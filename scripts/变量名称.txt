@@ -1,0 +1,19 @@
+属性名         类型            说明
+title         str            书名
+cover_image   str            封面图片 URL
+authors       list of str    作者列表，例如 ["张三", "李四"]
+publisher     str            出版社
+publication_date str         出版日期，统一用 "2020-10-01" 格式
+rating        float          评分
+author_intro  str            作者简介
+book_id       int            图书ID
+URL           str            图书详情页网址
+books_intro   str            内容简介
+also_like     list of str    "喜欢这本书的人也喜欢"的书名列表
+short_reviews list of str    短评列表，每条短评是一个字符串
+reviews       list of str    书评列表
+reading_notes list of str    读书笔记列表
+keywords      list of str    关键词列表
+domain        list of str    标签列表
+embedding     list of float  语义向量列表
+keywords_embeddings  list of float  关键词向量列表
