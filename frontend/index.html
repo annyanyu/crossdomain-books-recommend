@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据库连接测试</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .status {
+            text-align: center;
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        .button {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        .button:hover {
+            background-color: #45a049;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>数据库连接测试</h1>
+        <button class="button" onclick="checkHealth()">检查数据库连接</button>
+        <div id="status" class="status"></div>
+        <div id="loading" class="loading" style="display: none;">加载中...</div>
+        <table id="booksTable">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>书名</th>
+                    <th>作者</th>
+                    <th>出版社</th>
+                    <th>出版年</th>
+                    <th>评分</th>
+                </tr>
+            </thead>
+            <tbody id="booksBody">
+                <!-- 数据将通过JavaScript动态填充 -->
+            </tbody>
+        </table>
+    </div>
+    <script>
+        // 检查数据库连接
+        function checkHealth() {
+            const statusDiv = document.getElementById('status');
+            const loadingDiv = document.getElementById('loading');
+            
+            loadingDiv.style.display = 'block';
+            statusDiv.innerHTML = '';
+            
+            fetch('http://localhost:5000/api/health')
+                .then(response => response.json())
+                .then(data => {
+                    loadingDiv.style.display = 'none';
+                    if (data.success) {
+                        statusDiv.className = 'status success';
+                        statusDiv.innerHTML = data.message;
+                        // 连接成功后获取图书数据
+                        fetchBooks();
+                    } else {
+                        statusDiv.className = 'status error';
+                        statusDiv.innerHTML = data.message;
+                    }
+                })
+                .catch(error => {
+                    loadingDiv.style.display = 'none';
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = `连接失败: ${error.message}`;
+                });
+        }
+        
+        // 获取图书数据
+        function fetchBooks() {
+            const booksBody = document.getElementById('booksBody');
+            const loadingDiv = document.getElementById('loading');
+            
+            loadingDiv.style.display = 'block';
+            booksBody.innerHTML = '';
+            
+            fetch('http://localhost:5000/api/books')
+                .then(response => response.json())
+                .then(data => {
+                    loadingDiv.style.display = 'none';
+                    if (data.success) {
+                        data.data.forEach(book => {
+                            const row = document.createElement('tr');
+                            row.innerHTML = `
+                                <td>${book.id}</td>
+                                <td>${book.书名}</td>
+                                <td>${book.作者}</td>
+                                <td>${book.出版社}</td>
+                                <td>${book.出版年}</td>
+                                <td>${book.评分}</td>
+                            `;
+                            booksBody.appendChild(row);
+                        });
+                    } else {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `<td colspan="6" style="text-align: center; color: red;">${data.message}</td>`;
+                        booksBody.appendChild(row);
+                    }
+                })
+                .catch(error => {
+                    loadingDiv.style.display = 'none';
+                    const row = document.createElement('tr');
+                    row.innerHTML = `<td colspan="6" style="text-align: center; color: red;">获取数据失败: ${error.message}</td>`;
+                    booksBody.appendChild(row);
+                });
+        }
+        
+        // 页面加载时自动检查连接
+        window.onload = function() {
+            checkHealth();
+        };
+    </script>
+</body>
+</html>
