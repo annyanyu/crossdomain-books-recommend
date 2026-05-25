@@ -1,12 +1,20 @@
+# 图书推荐系统 - 合并依赖文件
+
+# 后端服务依赖
+Flask>=2.0.0
+Flask-CORS>=3.0.0
+
+# 数据库连接依赖
+pymysql>=1.0.0
+sqlalchemy>=1.4.0
+psycopg2-binary>=2.9.0  # 可选
+pymongo>=4.0.0  # 可选
+
+# 数据处理依赖
+pandas>=1.3.0
+numpy>=1.21.0
+
 # 关键词提取相关依赖
 jieba>=0.42.1
 scikit-learn>=1.0.0
 networkx>=2.6.0
-pandas>=1.3.0
-numpy>=1.21.0
-
-# 数据库连接依赖（可选）
-pymysql>=1.0.0
-psycopg2-binary>=2.9.0
-pymongo>=4.0.0
-sqlalchemy>=1.4.0
