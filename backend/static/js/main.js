@@ -2,6 +2,7 @@ let currentPage = 1;
 let currentBookId = null;
 let currentBeta = 0.25;
 let currentBooksData = [];
+let currentRecommendationsData = [];
 const perPage = 20;
 
 const defaultCoverUrl = 'https://via.placeholder.com/200x300?text=No+Cover';
@@ -316,6 +317,7 @@ async function loadRecommendations(bookId) {
 
         if (data.success && data.data.recommendations.length > 0) {
             const recommendations = data.data.recommendations;
+            currentRecommendationsData = recommendations;
             const domainDist = data.data.domain_distribution || {};
 
             const domainEntries = Object.entries(domainDist);
@@ -364,9 +366,83 @@ function renderRecommendationItem(book) {
                     ${overlapInfo}
                 </div>
                 <div class="recommendation-domains">${domainTags}</div>
+                <button class="reason-btn" onclick="event.stopPropagation(); toggleRecommendReason(${currentBookId}, ${book.book_id}, this)">
+                    💡 推荐理由
+                </button>
+                <div class="recommendation-reason" id="reason-${book.book_id}" style="display: none;"></div>
             </div>
         </div>
     `;
+}
+
+async function toggleRecommendReason(sourceBookId, recommendedBookId, btnElement) {
+    const reasonDiv = document.getElementById(`reason-${recommendedBookId}`);
+
+    if (reasonDiv.style.display !== 'none') {
+        reasonDiv.style.display = 'none';
+        btnElement.textContent = '💡 推荐理由';
+        btnElement.classList.remove('reason-btn-active');
+        return;
+    }
+
+    if (reasonDiv.dataset.loaded === 'true') {
+        reasonDiv.style.display = 'block';
+        btnElement.textContent = '💡 收起理由';
+        btnElement.classList.add('reason-btn-active');
+        return;
+    }
+
+    reasonDiv.innerHTML = '<div class="reason-loading"><span class="reason-loading-dot"></span> AI正在生成推荐理由...</div>';
+    reasonDiv.style.display = 'block';
+    btnElement.textContent = '💡 收起理由';
+    btnElement.classList.add('reason-btn-active');
+
+    try {
+        const similarityData = {
+            semantic_similarity: 0,
+            keyword_similarity: 0,
+            overlap_count: 0,
+            overlap_coefficient: 1,
+            combined_similarity: 0
+        };
+
+        const recBook = currentRecommendationsData.find(b => b.book_id === recommendedBookId);
+        if (recBook) {
+            similarityData.semantic_similarity = recBook.semantic_similarity || 0;
+            similarityData.keyword_similarity = recBook.keyword_similarity || 0;
+            similarityData.overlap_count = recBook.overlap_count || 0;
+            similarityData.overlap_coefficient = recBook.overlap_coefficient || 1;
+            similarityData.combined_similarity = recBook.combined_similarity || 0;
+        }
+
+        const response = await fetch('/api/recommend-reason', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                source_book_id: sourceBookId,
+                recommended_book_id: recommendedBookId,
+                similarity_data: similarityData,
+                beta: currentBeta
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            const fallbackBadge = data.data.is_fallback
+                ? '<span class="reason-fallback-badge">模板生成</span>'
+                : '<span class="reason-ai-badge">AI生成</span>';
+            reasonDiv.innerHTML = `
+                <div class="reason-header">${fallbackBadge} 推荐理由</div>
+                <div class="reason-text">${data.data.reason}</div>
+            `;
+            reasonDiv.dataset.loaded = 'true';
+        } else {
+            reasonDiv.innerHTML = `<div class="reason-error">生成失败: ${data.error}</div>`;
+        }
+    } catch (error) {
+        reasonDiv.innerHTML = `<div class="reason-error">网络错误: ${error.message}</div>`;
+    }
 }
 
 async function openBookDetail(bookId) {

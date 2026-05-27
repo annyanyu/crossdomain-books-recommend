@@ -7,6 +7,7 @@
 2. 提供图书详情API
 3. 提供推荐API（集成跨领域推荐算法）
 4. 提供多目标排序功能
+5. 提供推荐理由生成API（集成LLM）
 
 作者：四人小组
 日期：2026-03-25
@@ -15,6 +16,7 @@
 import os
 import sys
 import json
+import logging
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 
@@ -23,16 +25,19 @@ import pandas as pd
 
 from app.services.recommender import CrossDomainRecommender
 from app.services.ranker import MultiObjectiveRanker
+from app.services.llm_service import create_llm_service, get_cached_reason, TemplateLLM
 
 app = Flask(__name__)
 CORS(app)
 
 app.config['JSON_AS_ASCII'] = False
 
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config.json')
 
 def safe_json_loads(value, default=None):
-    """安全的JSON解析函数"""
     if default is None:
         default = []
     if not value:
@@ -52,9 +57,9 @@ def get_db_engine():
     connection_str = f"mysql+pymysql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['database']}?charset=utf8mb4"
     return create_engine(connection_str)
 
-# 缓存推荐器实例
 _recommender_instance = None
 _ranker_instance = None
+_llm_service_instance = None
 
 def get_recommender():
     global _recommender_instance, _ranker_instance
@@ -79,6 +84,17 @@ def get_recommender():
         _ranker_instance = MultiObjectiveRanker()
     
     return _recommender_instance, _ranker_instance
+
+def get_llm_service():
+    global _llm_service_instance
+    
+    if _llm_service_instance is None:
+        config = load_config()
+        llm_config = config.get('llm', {})
+        _llm_service_instance = create_llm_service(llm_config)
+        logger.info(f"[LLM服务] 初始化完成, provider={llm_config.get('provider', 'template')}")
+    
+    return _llm_service_instance
 
 @app.route('/')
 def index():
@@ -280,13 +296,145 @@ def get_recommendations(book_id):
                 'cross_domain': cross_domain,
                 'domain_distribution': domain_distribution,
                 'total_candidates': len(recommendations),
-                'beta': beta if beta else recommender.beta
+                'beta': beta if beta else recommender.beta,
+                'has_reason_support': True
             }
         })
     except Exception as e:
         import traceback
         traceback.print_exc()
         app.logger.error(f"[推荐API] 错误: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/recommend-reason', methods=['POST'])
+def get_recommend_reason():
+    """
+    推荐理由生成API
+    
+    请求体:
+    {
+        "source_book_id": 1,
+        "recommended_book_id": 2,
+        "similarity_data": {
+            "semantic_similarity": 0.85,
+            "keyword_similarity": 0.72,
+            "overlap_count": 1,
+            "overlap_coefficient": 0.75,
+            "combined_similarity": 0.80
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'success': False, 'error': '请求体不能为空'}), 400
+        
+        source_book_id = data.get('source_book_id')
+        recommended_book_id = data.get('recommended_book_id')
+        similarity_data = data.get('similarity_data', {})
+        beta = data.get('beta', 0.25)
+        
+        if not source_book_id or not recommended_book_id:
+            return jsonify({'success': False, 'error': '缺少source_book_id或recommended_book_id'}), 400
+        
+        logger.info(f"[推荐理由API] source_book_id={source_book_id}, recommended_book_id={recommended_book_id}, beta={beta}")
+        
+        engine = get_db_engine()
+        source_book = None
+        recommended_book = None
+        
+        with engine.connect() as conn:
+            query = text("""
+                SELECT book_id, title, authors, domain_tags, book_intro, keywords, rating
+                FROM books WHERE book_id = :book_id
+            """)
+            
+            result = conn.execute(query, {'book_id': source_book_id})
+            row = result.fetchone()
+            if row:
+                source_book = {
+                    'book_id': row[0],
+                    'title': row[1],
+                    'authors': safe_json_loads(row[2]),
+                    'domain_tags': safe_json_loads(row[3]),
+                    'book_intro': row[4] or '',
+                    'keywords': safe_json_loads(row[5]),
+                    'rating': row[6]
+                }
+            
+            result = conn.execute(query, {'book_id': recommended_book_id})
+            row = result.fetchone()
+            if row:
+                recommended_book = {
+                    'book_id': row[0],
+                    'title': row[1],
+                    'authors': safe_json_loads(row[2]),
+                    'domain_tags': safe_json_loads(row[3]),
+                    'book_intro': row[4] or '',
+                    'keywords': safe_json_loads(row[5]),
+                    'rating': row[6]
+                }
+        
+        if not source_book:
+            return jsonify({'success': False, 'error': f'源图书不存在: book_id={source_book_id}'}), 404
+        if not recommended_book:
+            return jsonify({'success': False, 'error': f'推荐图书不存在: book_id={recommended_book_id}'}), 404
+        
+        llm_service = get_llm_service()
+        
+        try:
+            reason = get_cached_reason(
+                source_book_id=source_book_id,
+                recommended_book_id=recommended_book_id,
+                beta=beta,
+                llm_service=llm_service,
+                source_book=source_book,
+                recommended_book=recommended_book,
+                similarity_data=similarity_data
+            )
+            
+            is_fallback = isinstance(llm_service, TemplateLLM)
+            
+            logger.info(f"[推荐理由API] 生成成功 | 源书:《{source_book['title']}》→ 推荐书:《{recommended_book['title']}》| 降级:{is_fallback}")
+            
+            return jsonify({
+                'success': True,
+                'data': {
+                    'reason': reason,
+                    'source_book_id': source_book_id,
+                    'recommended_book_id': recommended_book_id,
+                    'is_fallback': is_fallback
+                }
+            })
+        except Exception as llm_error:
+            logger.warning(f"[推荐理由API] LLM调用失败，尝试降级: {llm_error}")
+            
+            config = load_config()
+            fallback_provider = config.get('llm', {}).get('fallback_provider', 'template')
+            
+            if fallback_provider == 'template':
+                fallback_service = TemplateLLM()
+                reason = fallback_service.generate_reason(source_book, recommended_book, similarity_data)
+                
+                logger.info(f"[推荐理由API] 降级生成成功 | 源书:《{source_book['title']}》→ 推荐书:《{recommended_book['title']}》")
+                
+                return jsonify({
+                    'success': True,
+                    'data': {
+                        'reason': reason,
+                        'source_book_id': source_book_id,
+                        'recommended_book_id': recommended_book_id,
+                        'is_fallback': True
+                    }
+                })
+            else:
+                raise llm_error
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        logger.error(f"[推荐理由API] 错误: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/sort-modes', methods=['GET'])
@@ -328,7 +476,6 @@ def get_stats():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 def preload_recommender():
-    """预加载推荐器数据"""
     print("正在预加载推荐器数据，请稍候...")
     try:
         recommender, ranker = get_recommender()
@@ -337,7 +484,6 @@ def preload_recommender():
         print(f"预加载推荐器数据失败: {e}")
 
 if __name__ == '__main__':
-    # 预加载推荐器数据
     preload_recommender()
     
     config = load_config()

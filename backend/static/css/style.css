@@ -1484,3 +1484,124 @@ body {
         grid-template-columns: 1fr;
     }
 }
+
+.reason-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 6px;
+    padding: 4px 12px;
+    background: var(--gradient-subtle);
+    color: var(--primary);
+    border: 1px solid rgba(91, 106, 191, 0.2);
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.reason-btn:hover {
+    background: var(--gradient);
+    color: white;
+    border-color: transparent;
+    box-shadow: 0 2px 8px rgba(91, 106, 191, 0.25);
+}
+
+.reason-btn-active {
+    background: var(--gradient);
+    color: white;
+    border-color: transparent;
+}
+
+.recommendation-reason {
+    margin-top: 8px;
+    padding: 12px 14px;
+    background: linear-gradient(135deg, rgba(91, 106, 191, 0.04) 0%, rgba(139, 92, 246, 0.04) 100%);
+    border-left: 3px solid var(--primary);
+    border-radius: 0 8px 8px 0;
+    animation: reasonFadeIn 0.3s ease;
+}
+
+@keyframes reasonFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.reason-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.reason-ai-badge {
+    display: inline-block;
+    background: linear-gradient(135deg, #5b6abf 0%, #8b5cf6 100%);
+    color: white;
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.reason-fallback-badge {
+    display: inline-block;
+    background: #e2e8f0;
+    color: #64748b;
+    padding: 1px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.reason-text {
+    font-size: 13px;
+    line-height: 1.8;
+    color: var(--text-primary);
+}
+
+.reason-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.reason-loading-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--primary);
+    animation: reasonDot 1.2s ease-in-out infinite;
+}
+
+@keyframes reasonDot {
+    0%, 80%, 100% {
+        transform: scale(0.6);
+        opacity: 0.4;
+    }
+    40% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.reason-error {
+    font-size: 12px;
+    color: #ef4444;
+    padding: 4px 0;
+}
