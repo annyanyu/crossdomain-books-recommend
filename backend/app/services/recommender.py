@@ -107,6 +107,23 @@ class CrossDomainRecommender:
         logger.info(f"加载了 {len(books)} 本图书数据，耗时: {end_time - start_time:.2f}秒")
         
         return books
+
+    def add_book_to_index(self, book_data: dict):
+        """
+        将新书添加到内存索引，使其可被推荐算法即时检索
+
+        参数:
+            book_data: 包含 book_id, title, embedding, keywords_embeddings, domain_tags 的字典
+        """
+        new_entry = {
+            'book_id': book_data['book_id'],
+            'title': book_data.get('title', ''),
+            'embedding': book_data.get('embedding', []),
+            'keywords_embeddings': book_data.get('keywords_embeddings', []),
+            'domain_tags': book_data.get('domain_tags', []),
+        }
+        self.books_data.append(new_entry)
+        logger.info(f"[推荐器] 新书已加入索引: book_id={book_data['book_id']}, title={book_data.get('title', '')}, 当前总数={len(self.books_data)}")
     
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         if not vec1 or not vec2:

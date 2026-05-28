@@ -26,6 +26,8 @@ import pandas as pd
 from app.services.recommender import CrossDomainRecommender
 from app.services.ranker import MultiObjectiveRanker
 from app.services.llm_service import create_llm_service, get_cached_reason, TemplateLLM
+from app.services.douban_scraper import DoubanScraper
+from app.services.book_processor import BookProcessor
 
 app = Flask(__name__)
 CORS(app)
@@ -60,6 +62,8 @@ def get_db_engine():
 _recommender_instance = None
 _ranker_instance = None
 _llm_service_instance = None
+_book_processor_instance = None
+_douban_scraper_instance = None
 
 def get_recommender():
     global _recommender_instance, _ranker_instance
@@ -95,6 +99,49 @@ def get_llm_service():
         logger.info(f"[LLM服务] 初始化完成, provider={llm_config.get('provider', 'template')}")
     
     return _llm_service_instance
+
+def get_book_processor():
+    global _book_processor_instance
+
+    if _book_processor_instance is None:
+        config = load_config()
+        db_config = config['database']
+        _book_processor_instance = BookProcessor(db_config)
+
+    return _book_processor_instance
+
+def get_douban_scraper():
+    global _douban_scraper_instance
+
+    if _douban_scraper_instance is None:
+        _douban_scraper_instance = DoubanScraper(timeout=15, max_retries=3)
+
+    return _douban_scraper_instance
+
+def _check_duplicate(book_data: dict, engine) -> tuple:
+    """
+    检查书籍是否已存在
+    返回: (是否重复, 已有book_id或None)
+    """
+    with engine.connect() as conn:
+        if book_data.get('URL'):
+            result = conn.execute(
+                text("SELECT book_id FROM books WHERE URL = :url LIMIT 1"),
+                {'url': book_data['URL']}
+            ).fetchone()
+            if result:
+                return True, result[0]
+
+        if book_data.get('title') and book_data.get('authors'):
+            authors_json = json.dumps(book_data['authors'], ensure_ascii=False)
+            result = conn.execute(
+                text("SELECT book_id FROM books WHERE title = :title AND authors = :authors LIMIT 1"),
+                {'title': book_data['title'], 'authors': authors_json}
+            ).fetchone()
+            if result:
+                return True, result[0]
+
+    return False, None
 
 @app.route('/')
 def index():
@@ -474,6 +521,119 @@ def get_stats():
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/books/add', methods=['POST'])
+def add_book():
+    """新书添加API：豆瓣URL爬取 → 数据处理 → 入库 → 更新推荐索引"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': '请求数据为空'}), 400
+
+        douban_url = data.get('douban_url', '').strip()
+        if not douban_url:
+            return jsonify({'success': False, 'error': '请输入豆瓣书籍详情页URL'}), 400
+
+        is_valid, result = DoubanScraper.validate_url(douban_url)
+        if not is_valid:
+            return jsonify({'success': False, 'error': result}), 400
+
+        logger.info(f"[新书添加] 开始处理: URL={douban_url}")
+
+        scraper = get_douban_scraper()
+        book_data = scraper.scrape_book(douban_url)
+        logger.info(f"[新书添加] 爬取完成: 《{book_data.get('title')}》")
+
+        engine = get_db_engine()
+        is_dup, existing_id = _check_duplicate(book_data, engine)
+        if is_dup:
+            logger.info(f"[新书添加] 书籍已存在: book_id={existing_id}")
+            return jsonify({
+                'success': False,
+                'error': f'该书籍已在系统中存在（ID: {existing_id}）',
+                'existing_book_id': existing_id
+            }), 409
+
+        processor = get_book_processor()
+        processed_data = processor.process_new_book(book_data)
+        logger.info(f"[新书添加] 数据处理完成: 《{processed_data.get('title')}》")
+
+        authors_json = processed_data.get('authors', [])
+        if isinstance(authors_json, list):
+            authors_json = json.dumps(authors_json, ensure_ascii=False)
+
+        insert_query = text("""
+            INSERT INTO books (
+                title, cover_image, authors, publisher, publication_date, rating,
+                URL, book_intro, also_like,
+                keywords, embedding, keywords_embeddings, domain_tags
+            ) VALUES (
+                :title, :cover_image, :authors, :publisher, :publication_date, :rating,
+                :url, :book_intro, :also_like,
+                :keywords, :embedding, :keywords_embeddings, :domain_tags
+            )
+        """)
+
+        insert_params = {
+            'title': processed_data.get('title', ''),
+            'cover_image': processed_data.get('cover_image'),
+            'authors': authors_json,
+            'publisher': processed_data.get('publisher'),
+            'publication_date': processed_data.get('publication_date'),
+            'rating': processed_data.get('rating'),
+            'url': processed_data.get('URL'),
+            'book_intro': processed_data.get('books_intro'),
+            'also_like': json.dumps(processed_data.get('also_like', []), ensure_ascii=False) if isinstance(processed_data.get('also_like'), list) else processed_data.get('also_like', '[]'),
+            'keywords': processed_data.get('keywords', '[]'),
+            'embedding': processed_data.get('embedding', '[]'),
+            'keywords_embeddings': processed_data.get('keywords_embeddings', '[]'),
+            'domain_tags': processed_data.get('domain_tags', '[]'),
+        }
+
+        with engine.begin() as conn:
+            result = conn.execute(insert_query, insert_params)
+            new_book_id = result.lastrowid
+
+        logger.info(f"[新书添加] 数据库写入成功: book_id={new_book_id}")
+
+        try:
+            recommender, _ = get_recommender()
+            recommender.add_book_to_index({
+                'book_id': new_book_id,
+                'title': processed_data.get('title', ''),
+                'embedding': json.loads(processed_data.get('embedding', '[]')),
+                'keywords_embeddings': json.loads(processed_data.get('keywords_embeddings', '[]')),
+                'domain_tags': json.loads(processed_data.get('domain_tags', '[]')),
+            })
+            logger.info(f"[新书添加] 推荐索引更新成功: book_id={new_book_id}")
+        except Exception as e:
+            logger.warning(f"[新书添加] 推荐索引更新失败（不影响数据入库）: {e}")
+
+        try:
+            processor.add_to_corpus_cache(processed_data)
+        except Exception as e:
+            logger.warning(f"[新书添加] 语料库缓存更新失败: {e}")
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'book_id': new_book_id,
+                'title': processed_data.get('title', ''),
+                'authors': processed_data.get('authors', []),
+                'domain_tags': json.loads(processed_data.get('domain_tags', '[]')),
+                'keywords': json.loads(processed_data.get('keywords', '[]'))[:5],
+            }
+        })
+
+    except ValueError as e:
+        logger.warning(f"[新书添加] 参数错误: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except RuntimeError as e:
+        logger.error(f"[新书添加] 运行时错误: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 422
+    except Exception as e:
+        logger.error(f"[新书添加] 未知错误: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': f'系统错误: {str(e)}'}), 500
 
 def preload_recommender():
     print("正在预加载推荐器数据，请稍候...")

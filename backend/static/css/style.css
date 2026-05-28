@@ -904,7 +904,8 @@ body {
 
 .slider-tooltip {
     position: absolute;
-    top: -8px;
+    top: 0;
+    left: 0;
     background: var(--gradient);
     color: white;
     font-size: 12px;
@@ -915,7 +916,8 @@ body {
     white-space: nowrap;
     z-index: 10;
     box-shadow: 0 2px 8px rgba(91, 106, 191, 0.3);
-    transition: left 0.05s ease;
+    will-change: transform;
+    transform: translateX(-50%);
 }
 
 .slider-tooltip::after {
@@ -1604,4 +1606,323 @@ body {
     font-size: 12px;
     color: #ef4444;
     padding: 4px 0;
+}
+
+.no-result-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 48px 20px;
+    text-align: center;
+    grid-column: 1 / -1;
+}
+
+.no-result-icon {
+    font-size: 56px;
+    margin-bottom: 16px;
+    opacity: 0.85;
+}
+
+.no-result-title {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+}
+
+.no-result-desc {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+    line-height: 1.6;
+}
+
+.add-book-section {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    max-width: 600px;
+}
+
+.douban-url-input {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1px solid rgba(91, 106, 191, 0.2);
+    border-radius: 8px;
+    font-size: 13px;
+    outline: none;
+    transition: border-color var(--transition);
+    background: white;
+}
+
+.douban-url-input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(91, 106, 191, 0.1);
+}
+
+.douban-url-input::placeholder {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.add-book-btn {
+    padding: 10px 20px;
+    background: var(--gradient);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition);
+    white-space: nowrap;
+}
+
+.add-book-btn:hover:not(:disabled) {
+    box-shadow: 0 4px 12px rgba(91, 106, 191, 0.3);
+    transform: translateY(-1px);
+}
+
+.add-book-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.add-book-status {
+    margin-top: 16px;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    max-width: 600px;
+    width: 100%;
+    text-align: left;
+}
+
+.status-loading {
+    background: rgba(91, 106, 191, 0.06);
+    color: var(--text-secondary);
+}
+
+.status-success {
+    background: rgba(34, 197, 94, 0.08);
+    color: #16a34a;
+    border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.status-error {
+    background: rgba(239, 68, 68, 0.06);
+    color: #dc2626;
+    border: 1px solid rgba(239, 68, 68, 0.15);
+}
+
+.add-book-inline-entry {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 14px 18px;
+    margin-top: 4px;
+    border: 1px solid rgba(91, 106, 191, 0.08);
+    border-left: 3px solid var(--primary);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition);
+    background: linear-gradient(135deg, rgba(91, 106, 191, 0.02) 0%, rgba(139, 92, 246, 0.02) 100%);
+    position: relative;
+    user-select: none;
+}
+
+.add-book-inline-entry:hover {
+    border-color: rgba(91, 106, 191, 0.2);
+    border-left-color: var(--accent);
+    background: linear-gradient(135deg, rgba(91, 106, 191, 0.05) 0%, rgba(139, 92, 246, 0.05) 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(91, 106, 191, 0.08);
+}
+
+.add-book-inline-entry:active {
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+.add-book-inline-entry.entry-expanded {
+    border-color: rgba(91, 106, 191, 0.15);
+    border-left-color: var(--accent);
+    background: linear-gradient(135deg, rgba(91, 106, 191, 0.04) 0%, rgba(139, 92, 246, 0.04) 100%);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.add-book-inline-icon {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--gradient-subtle);
+    color: var(--primary);
+    flex-shrink: 0;
+    transition: all var(--transition);
+}
+
+.add-book-inline-entry:hover .add-book-inline-icon {
+    background: var(--gradient);
+    color: white;
+}
+
+.add-book-inline-entry.entry-expanded .add-book-inline-icon {
+    background: var(--gradient);
+    color: white;
+    transform: rotate(45deg);
+}
+
+.add-book-inline-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-weight: 500;
+    transition: color var(--transition);
+}
+
+.add-book-inline-entry:hover .add-book-inline-text {
+    color: var(--primary);
+}
+
+.add-book-inline-arrow {
+    margin-left: auto;
+    color: var(--text-muted);
+    transition: all var(--transition);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+}
+
+.add-book-inline-entry:hover .add-book-inline-arrow {
+    color: var(--primary-light);
+}
+
+.add-book-inline-entry.entry-expanded .add-book-inline-arrow {
+    transform: rotate(180deg);
+    color: var(--primary);
+}
+
+.inline-add-book-panel {
+    grid-column: 1 / -1;
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.3s ease,
+                padding 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.3s ease;
+    padding: 0 16px;
+    border: 1px solid transparent;
+    border-top: none;
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    background: linear-gradient(135deg, rgba(91, 106, 191, 0.015) 0%, rgba(139, 92, 246, 0.015) 100%);
+}
+
+.inline-add-book-panel.active {
+    max-height: 250px;
+    opacity: 1;
+    padding: 16px;
+    border-color: rgba(91, 106, 191, 0.1);
+    border-left: 3px solid var(--accent);
+    background: linear-gradient(135deg, rgba(91, 106, 191, 0.03) 0%, rgba(139, 92, 246, 0.03) 100%);
+}
+
+.inline-add-book-panel .add-book-section {
+    max-width: 100%;
+}
+
+.left-section-narrow .no-result-container {
+    padding: 28px 12px;
+}
+
+.left-section-narrow .no-result-icon {
+    font-size: 40px;
+}
+
+.left-section-narrow .no-result-title {
+    font-size: 14px;
+}
+
+.left-section-narrow .no-result-desc {
+    font-size: 12px;
+    margin-bottom: 14px;
+}
+
+.left-section-narrow .no-result-container .add-book-section {
+    flex-direction: column;
+    max-width: 100%;
+    gap: 8px;
+}
+
+.left-section-narrow .no-result-container .douban-url-input {
+    font-size: 12px;
+    padding: 8px 10px;
+}
+
+.left-section-narrow .no-result-container .add-book-btn {
+    width: 100%;
+    justify-content: center;
+    font-size: 13px;
+    padding: 8px 16px;
+}
+
+.left-section-narrow .no-result-container .add-book-status {
+    max-width: 100%;
+    font-size: 12px;
+}
+
+.left-section-narrow .add-book-inline-entry {
+    padding: 10px 12px;
+    gap: 8px;
+}
+
+.left-section-narrow .add-book-inline-icon {
+    width: 24px;
+    height: 24px;
+}
+
+.left-section-narrow .add-book-inline-icon svg {
+    width: 12px;
+    height: 12px;
+}
+
+.left-section-narrow .add-book-inline-text {
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.left-section-narrow .add-book-inline-arrow {
+    display: none;
+}
+
+.left-section-narrow .inline-add-book-panel.active {
+    padding: 12px;
+    max-height: 320px;
+}
+
+.left-section-narrow .inline-add-book-panel .add-book-section {
+    flex-direction: column;
+    gap: 8px;
+}
+
+.left-section-narrow .inline-add-book-panel .douban-url-input {
+    font-size: 12px;
+    padding: 8px 10px;
+}
+
+.left-section-narrow .inline-add-book-panel .add-book-btn {
+    width: 100%;
+    justify-content: center;
+    font-size: 13px;
+    padding: 8px 16px;
+}
+
+.left-section-narrow .inline-add-book-panel .add-book-status {
+    max-width: 100%;
+    font-size: 12px;
 }

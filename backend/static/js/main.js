@@ -4,6 +4,8 @@ let currentBeta = 0.25;
 let currentBooksData = [];
 let currentRecommendationsData = [];
 const perPage = 20;
+let sliderRafId = null;
+let recommendDebounceTimer = null;
 
 const defaultCoverUrl = 'https://via.placeholder.com/200x300?text=No+Cover';
 
@@ -31,9 +33,20 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('betaSlider').addEventListener('input', function() {
         currentBeta = parseInt(this.value) / 100;
         updateSliderDescription();
-        if (currentBookId) {
-            loadRecommendations(currentBookId);
-        }
+
+        if (sliderRafId) cancelAnimationFrame(sliderRafId);
+        sliderRafId = requestAnimationFrame(() => {
+            updateSliderTooltip();
+            sliderRafId = null;
+        });
+
+        if (recommendDebounceTimer) clearTimeout(recommendDebounceTimer);
+        recommendDebounceTimer = setTimeout(() => {
+            if (currentBookId) {
+                loadRecommendations(currentBookId);
+            }
+            recommendDebounceTimer = null;
+        }, 300);
     });
 
     document.getElementById('bookDetailModal').addEventListener('click', function(e) {
@@ -44,7 +57,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     window.addEventListener('resize', function() {
         if (document.getElementById('recommendPanel').style.display !== 'none') {
-            updateSliderTooltip();
+            if (sliderRafId) cancelAnimationFrame(sliderRafId);
+            sliderRafId = requestAnimationFrame(() => {
+                updateSliderTooltip();
+                sliderRafId = null;
+            });
         }
     });
 });
@@ -53,22 +70,25 @@ function updateSliderDescription() {
     const descEl = document.getElementById('sliderDesc');
     const desc = betaDescriptions[currentBeta] || betaDescriptions[0.25];
     descEl.textContent = '💡 ' + desc;
-    updateSliderTooltip();
 }
 
 function updateSliderTooltip() {
     const slider = document.getElementById('betaSlider');
     const tooltip = document.getElementById('sliderTooltip');
+    if (!slider || !tooltip) return;
+
     const min = parseFloat(slider.min);
     const max = parseFloat(slider.max);
     const val = parseFloat(slider.value);
-    const percent = (val - min) / (max - min);
+    const ratio = (val - min) / (max - min);
+
+    const thumbWidth = 18;
     const sliderWidth = slider.offsetWidth;
-    const thumbHalf = 10;
-    const left = percent * (sliderWidth - thumbHalf * 2) + thumbHalf;
+    const trackWidth = sliderWidth - thumbWidth;
+    const thumbCenter = ratio * trackWidth + thumbWidth / 2;
+
     tooltip.textContent = currentBeta.toFixed(2);
-    tooltip.style.left = left + 'px';
-    tooltip.style.transform = 'translateX(-50%)';
+    tooltip.style.transform = `translateX(${thumbCenter}px) translateX(-50%)`;
 }
 
 async function loadBooks(page = 1) {
@@ -127,7 +147,27 @@ function renderBooks(books) {
     const booksGrid = document.getElementById('booksGrid');
 
     if (books.length === 0) {
-        booksGrid.innerHTML = '<div class="loading">暂无图书数据</div>';
+        const searchValue = document.getElementById('searchInput').value;
+        if (searchValue && searchValue.trim()) {
+            booksGrid.innerHTML = `
+                <div class="no-result-container">
+                    <div class="no-result-icon">📚</div>
+                    <div class="no-result-title">未找到"${searchValue}"相关书籍</div>
+                    <div class="no-result-desc">您可以尝试其他关键词，或通过豆瓣链接添加新书</div>
+                    <div class="add-book-section">
+                        <input type="text" id="doubanUrlInput"
+                               placeholder="请输入豆瓣书籍详情页URL，如 https://book.douban.com/subject/1234567/"
+                               class="douban-url-input">
+                        <button onclick="addNewBook()" class="add-book-btn" id="addBookBtn">
+                            📖 添加新书
+                        </button>
+                    </div>
+                    <div id="addBookStatus" class="add-book-status" style="display:none;"></div>
+                </div>
+            `;
+        } else {
+            booksGrid.innerHTML = '<div class="loading">暂无图书数据</div>';
+        }
         return;
     }
 
@@ -184,7 +224,35 @@ function renderBooks(books) {
                 </button>
             </div>
         </div>
-    `}).join('');
+    `}).join('') + `
+        <div class="add-book-inline-entry" onclick="toggleInlineAddBook()">
+            <div class="add-book-inline-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
+            <div class="add-book-inline-text">没有找到想要的书籍？点击添加新书</div>
+            <div class="add-book-inline-arrow"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></div>
+        </div>
+        <div id="inlineAddBookPanel" class="inline-add-book-panel">
+            <div class="add-book-section">
+                <input type="text" id="inlineDoubanUrlInput"
+                       placeholder="请输入豆瓣书籍详情页URL"
+                       class="douban-url-input">
+                <button onclick="addNewBookInline()" class="add-book-btn" id="inlineAddBookBtn">
+                    📖 添加新书
+                </button>
+            </div>
+            <div id="inlineAddBookStatus" class="add-book-status" style="display:none;"></div>
+        </div>
+    `;
+}
+
+function toggleInlineAddBook() {
+    const panel = document.getElementById('inlineAddBookPanel');
+    const entry = document.querySelector('.add-book-inline-entry');
+    if (panel) {
+        panel.classList.toggle('active');
+    }
+    if (entry) {
+        entry.classList.toggle('entry-expanded');
+    }
 }
 
 function renderPagination(totalPages, currentPage) {
@@ -240,6 +308,8 @@ async function selectBook(bookId) {
 
     document.getElementById('leftSection').classList.add('left-section-narrow');
     document.getElementById('rightSection').classList.add('right-section-wide');
+
+    setTimeout(() => updateSliderTooltip(), 0);
 
     document.getElementById('selectedBookCard').innerHTML = '<div class="loading">加载中...</div>';
     document.getElementById('crossDomainRecommendations').innerHTML = '<div class="loading">加载中...</div>';
@@ -510,4 +580,115 @@ function closeBookDetail() {
 
 function searchBooks() {
     loadBooks(1);
+}
+
+function validateDoubanUrl(url) {
+    const pattern = /^https?:\/\/book\.douban\.com\/subject\/\d+\/?/;
+    return pattern.test(url.trim());
+}
+
+async function addNewBook() {
+    const urlInput = document.getElementById('doubanUrlInput');
+    const statusDiv = document.getElementById('addBookStatus');
+    const btn = document.getElementById('addBookBtn');
+
+    if (!urlInput || !statusDiv || !btn) return;
+
+    const url = urlInput.value.trim();
+
+    if (!url) {
+        showAddBookStatus('error', '请输入豆瓣书籍详情页URL', statusDiv);
+        return;
+    }
+    if (!validateDoubanUrl(url)) {
+        showAddBookStatus('error', 'URL格式不正确，请输入有效的豆瓣书籍详情页地址', statusDiv);
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = '⏳ 处理中...';
+    showAddBookStatus('loading', '正在采集书籍信息...', statusDiv);
+
+    try {
+        const response = await fetch('/api/books/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ douban_url: url })
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showAddBookStatus('success', `《${data.data.title}》添加成功！正在加载跨域推荐...`, statusDiv);
+            document.getElementById('searchInput').value = '';
+            selectBook(data.data.book_id);
+        } else {
+            showAddBookStatus('error', data.error || '添加失败', statusDiv);
+            btn.disabled = false;
+            btn.textContent = '📖 添加新书';
+        }
+    } catch (error) {
+        showAddBookStatus('error', '网络错误: ' + error.message, statusDiv);
+        btn.disabled = false;
+        btn.textContent = '📖 添加新书';
+    }
+}
+
+async function addNewBookInline() {
+    const urlInput = document.getElementById('inlineDoubanUrlInput');
+    const statusDiv = document.getElementById('inlineAddBookStatus');
+    const btn = document.getElementById('inlineAddBookBtn');
+
+    if (!urlInput || !statusDiv || !btn) return;
+
+    const url = urlInput.value.trim();
+
+    if (!url) {
+        showAddBookStatus('error', '请输入豆瓣书籍详情页URL', statusDiv);
+        return;
+    }
+    if (!validateDoubanUrl(url)) {
+        showAddBookStatus('error', 'URL格式不正确，请输入有效的豆瓣书籍详情页地址', statusDiv);
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = '⏳ 处理中...';
+    showAddBookStatus('loading', '正在采集书籍信息...', statusDiv);
+
+    try {
+        const response = await fetch('/api/books/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ douban_url: url })
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            showAddBookStatus('success', `《${data.data.title}》添加成功！正在加载跨域推荐...`, statusDiv);
+            selectBook(data.data.book_id);
+        } else {
+            showAddBookStatus('error', data.error || '添加失败', statusDiv);
+            btn.disabled = false;
+            btn.textContent = '📖 添加新书';
+        }
+    } catch (error) {
+        showAddBookStatus('error', '网络错误: ' + error.message, statusDiv);
+        btn.disabled = false;
+        btn.textContent = '📖 添加新书';
+    }
+}
+
+function showAddBookStatus(type, message, targetDiv) {
+    if (!targetDiv) {
+        targetDiv = document.getElementById('addBookStatus');
+    }
+    if (!targetDiv) return;
+    targetDiv.style.display = 'block';
+    const icons = { loading: '', success: '✅', error: '❌' };
+    targetDiv.className = `add-book-status status-${type}`;
+    if (type === 'loading') {
+        targetDiv.innerHTML = `<span class="reason-loading-dot"></span> ${message}`;
+    } else {
+        targetDiv.innerHTML = `${icons[type]} ${message}`;
+    }
 }
