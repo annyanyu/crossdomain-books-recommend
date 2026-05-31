@@ -7,7 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>跨域图书推荐系统</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=11">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=21">
 </head>
 <body>
     <header class="header">
@@ -25,54 +25,46 @@
     <main class="main-content">
         <div class="container">
             <div class="search-sort-bar">
-                <div class="search-box">
+                <div class="search-box search-box-wide">
                     <input type="text" id="searchInput" placeholder="搜索图书标题、作者...">
                     <button onclick="searchBooks()">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                         搜索
                     </button>
                 </div>
-                <div class="sort-box">
-                    <label>排序</label>
-                    <select id="sortMode" onchange="loadBooks()">
-                        <option value="comprehensive">综合排序</option>
-                        <option value="similarity">相似度排序</option>
-                        <option value="rating">评分排序</option>
-                        <option value="newest">最新排序</option>
-                    </select>
-                </div>
             </div>
 
             <div class="main-layout">
                 <div class="left-section" id="leftSection">
-                    <div class="bubble-intro" id="bubbleIntro">
-                        <div class="bubble-title">📖 关于跨域推荐</div>
-                        <div class="bubble-content">
-                            <p>本系统基于<strong>跨领域推荐算法</strong>，通过分析图书的语义特征与关键词，结合领域标签，为您发现不同领域的精彩书籍。</p>
+                <div class="bubble-intro" id="bubbleIntro">
+                    <div class="bubble-title">📖 关于跨域推荐</div>
+                    <div class="bubble-content">
+                        <p>本系统基于<strong>跨领域推荐算法</strong>，通过分析图书的语义特征与关键词，结合领域标签，为您发现不同领域的精彩书籍。</p>
+                    </div>
+                    <div class="bubble-features">
+                        <div class="bubble-item">
+                            <span class="bubble-icon">🎯</span>
+                            <span class="bubble-text">智能推荐 — 基于内容相似度的精准匹配</span>
                         </div>
-                        <div class="bubble-features">
-                            <div class="bubble-item">
-                                <span class="bubble-icon">🎯</span>
-                                <span class="bubble-text">智能推荐 — 基于内容相似度的精准匹配</span>
-                            </div>
-                            <div class="bubble-item">
-                                <span class="bubble-icon">🔄</span>
-                                <span class="bubble-text">跨域发现 — 探索不同知识领域的精彩图书</span>
-                            </div>
-                            <div class="bubble-item">
-                                <span class="bubble-icon">📊</span>
-                                <span class="bubble-text">多维度排序 — 综合/相似度/评分/最新</span>
-                            </div>
+                        <div class="bubble-item">
+                            <span class="bubble-icon">🔄</span>
+                            <span class="bubble-text">跨域发现 — 探索不同知识领域的精彩图书</span>
+                        </div>
+                        <div class="bubble-item">
+                            <span class="bubble-icon">📊</span>
+                            <span class="bubble-text">多维度排序 — 综合/相似度/评分/最新</span>
                         </div>
                     </div>
-
-                    <section class="books-section">
-                        <div class="books-grid" id="booksGrid">
-                            <div class="loading">加载中...</div>
-                        </div>
-                        <div class="pagination" id="pagination"></div>
-                    </section>
                 </div>
+
+                <div class="books-grid-title" id="booksGridTitle" style="display: none;">
+                    <h2 class="section-title">📚 搜索结果</h2>
+                </div>
+
+                <div class="books-grid" id="booksGrid"></div>
+                <div class="pagination" id="pagination"></div>
+
+            </div>
 
                 <aside class="right-section" id="rightSection">
                     <div id="defaultPanel">
@@ -95,13 +87,12 @@
                                 返回浏览
                             </button>
                         </div>
-                        <div id="selectedBookCard" class="selected-book-card"></div>
                         <div class="slider-section">
                             <div class="slider-header">
                                 <span class="slider-label">领域跨越度</span>
+                                <span class="slider-value-display" id="sliderTooltip">0.25</span>
                             </div>
                             <div class="slider-container">
-                                <div class="slider-tooltip" id="sliderTooltip">0.25</div>
                                 <input type="range" id="betaSlider" min="10" max="45" value="25" step="5" class="beta-slider">
                                 <div class="slider-recommend-mark" style="left: 42.86%;"></div>
                             </div>
@@ -111,6 +102,14 @@
                         <div id="domainDistribution" class="domain-distribution" style="display: none;"></div>
                         <div class="recommend-results-header">
                             <span class="recommend-results-title">推荐结果</span>
+                            <div class="recommend-sort-wrapper">
+                                <label>排序</label>
+                                <select id="recommendSortMode" class="recommend-sort-select" onchange="loadRecommendations(currentBookId)">
+                                    <option value="comprehensive">综合排序</option>
+                                    <option value="similarity">相似度</option>
+                                    <option value="rating">评分</option>
+                                </select>
+                            </div>
                         </div>
                         <div class="recommend-panel-grid" id="crossDomainRecommendations">
                             <div class="loading">点击左侧图书开始跨域推荐</div>
@@ -127,6 +126,6 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/main.js') }}?v=11"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}?v=16"></script>
 </body>
 </html>

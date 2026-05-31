@@ -3,8 +3,8 @@
         "host": "localhost",
         "port": 3306,
         "user": "root",
-        "password": "Anny0607",
-        "database": "test",
+        "password": "3186732205wr",
+        "database": "douban_books",
         "table": "books"
     },
     "recommender": {

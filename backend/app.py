@@ -169,7 +169,7 @@ def get_books():
                 query = text(f"""
                     SELECT book_id, title, authors, publisher, publication_date, rating, 
                            cover_image, book_intro, domain_tags
-                    FROM books 
+                    FROM books
                     WHERE title LIKE :search OR authors LIKE :search
                     ORDER BY {order_by}
                     LIMIT :limit OFFSET :offset
@@ -184,7 +184,7 @@ def get_books():
                 total = conn.execute(count_query, {'search': f'%{search}%'}).scalar()
             else:
                 query = text(f"""
-                    SELECT book_id, title, authors, publisher, publication_date, rating, 
+                    SELECT book_id, title, authors, publisher, publication_date, rating,
                            cover_image, book_intro, domain_tags
                     FROM books 
                     ORDER BY {order_by}
@@ -237,10 +237,10 @@ def get_book_detail(book_id):
             """)
             result = conn.execute(query, {'book_id': book_id})
             row = result.fetchone()
-            
+
             if not row:
                 return jsonify({'success': False, 'error': '图书不存在'}), 404
-            
+
             book = {
                 'book_id': row[0],
                 'title': row[1],
@@ -582,7 +582,7 @@ def add_book():
             'publication_date': processed_data.get('publication_date'),
             'rating': processed_data.get('rating'),
             'url': processed_data.get('URL'),
-            'book_intro': processed_data.get('books_intro'),
+            'book_intro': processed_data.get('book_intro'),
             'also_like': json.dumps(processed_data.get('also_like', []), ensure_ascii=False) if isinstance(processed_data.get('also_like'), list) else processed_data.get('also_like', '[]'),
             'keywords': processed_data.get('keywords', '[]'),
             'embedding': processed_data.get('embedding', '[]'),

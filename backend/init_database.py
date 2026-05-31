@@ -26,7 +26,7 @@ def load_config():
         return json.load(f)
 
 def load_domain_tags():
-    domain_tags_path = os.path.join(os.path.dirname(__file__), '..', '数据库及算法文件', 'scripts', 'domain_tags.json')
+    domain_tags_path = os.path.join(os.path.dirname(__file__), '..', 'algorithms', 'scripts', 'domain_tags.json')
     with open(domain_tags_path, 'r', encoding='utf-8') as f:
         domains = json.load(f)
     return [d['domain'] for d in domains]
