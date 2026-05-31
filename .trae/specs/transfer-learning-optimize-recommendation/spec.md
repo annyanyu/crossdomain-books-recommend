@@ -1,0 +1,264 @@
+# 基于迁移学习（领域自适应）的跨领域推荐算法优化 Spec
+
+## Why
+
+当前跨领域推荐算法采用"余弦相似度 + 重叠标签系数"的浅层匹配策略，核心问题在于：BGE预训练模型虽然将所有书籍映射到同一768维向量空间，但不同领域书籍的向量分布存在系统性偏移——计算机书的向量聚集在一个区域，心理学书聚集在另一个区域，直接计算余弦相似度会系统性地低估跨域书籍间的语义关联。迁移学习（特别是领域自适应Domain Adaptation）通过学习领域间的向量对齐映射，消除这种分布偏移，使跨域比较在同一尺度下进行，从根本上解决"量尺不准"的问题。此外，迁移学习不依赖also_like图结构数据，在数据稀疏场景下仍能有效工作。
+
+## What Changes
+
+- 新增**book_also_like独立关系表**：将"喜欢这本书的人也喜欢"数据从books表JSON字段拆分为独立关系表
+- 新增**豆瓣also_like数据采集**：扩展爬虫抓取"喜欢这本书的人也喜欢"区域数据
+- 新增**领域自适应对齐模块**：学习各领域到统一向量空间的线性投影矩阵，消除领域间向量分布偏移
+- 新增**对比学习跨域对齐模块**：利用also_like共现关系构建跨域正样本对，通过对比学习拉近跨域关联书籍的向量
+- 新增**知识概念桥接模块**：基于关键词共现构建领域间桥接图谱，提供跨域推荐解释路径
+- 修改**跨域推荐核心算法**：在现有相似度计算框架中融入对齐后语义相似度和共现关联度
+- 修改**推荐理由生成**：融合知识图谱推理路径，提供结构化的跨域推荐解释
+
+## Impact
+
+- Affected code:
+  - `backend/app/services/recommender.py` — 核心推荐算法重构
+  - `backend/app/services/douban_scraper.py` — 新增also_like数据抓取
+  - `backend/app/services/book_processor.py` — 新增领域对齐处理步骤
+  - `backend/app.py` — 新增对齐模型加载/更新API端点，修改新书入库逻辑
+  - `backend/init_database.py` — 数据库表结构扩展（新增book_also_like表）
+- 新增文件：
+  - `backend/app/services/domain_aligner.py` — 领域自适应对齐模块
+  - `backend/app/services/knowledge_bridge.py` — 知识概念桥接模块
+  - `algorithms/scripts/train_domain_aligner.py` — 领域对齐模型训练脚本
+  - `algorithms/scripts/train_contrastive_aligner.py` — 对比学习对齐训练脚本
+  - `backend/migrate_add_also_like_table.py` — 数据库迁移脚本
+
+## ADDED Requirements
+
+### Requirement: book_also_like独立关系表
+
+系统SHALL创建独立的also_like关系表，将"喜欢这本书的人也喜欢"数据从books表的JSON字段拆分为规范化的关系表。
+
+#### Scenario: 关系表结构设计
+- **WHEN** 系统初始化数据库
+- **THEN** 创建`book_also_like`表，结构如下：
+  ```sql
+  CREATE TABLE IF NOT EXISTS book_also_like (
+      relation_id INT AUTO_INCREMENT PRIMARY KEY COMMENT '关系ID',
+      source_book_id INT NOT NULL COMMENT '源书籍ID',
+      target_book_id INT COMMENT '目标书籍ID（匹配成功时非空）',
+      target_book_name VARCHAR(255) NOT NULL COMMENT '目标书籍名称（豆瓣原始书名）',
+      match_type ENUM('exact', 'fuzzy', 'unmatched') NOT NULL DEFAULT 'unmatched' COMMENT '匹配类型',
+      match_score FLOAT DEFAULT 0.0 COMMENT '匹配得分（0.0~1.0）',
+      weight FLOAT DEFAULT 1.0 COMMENT '关系权重',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+      UNIQUE KEY uk_source_target (source_book_id, target_book_name),
+      INDEX idx_source_book (source_book_id),
+      INDEX idx_target_book (target_book_id),
+      INDEX idx_match_type (match_type),
+      CONSTRAINT fk_also_like_source FOREIGN KEY (source_book_id) REFERENCES books(book_id) ON DELETE CASCADE,
+      CONSTRAINT fk_also_like_target FOREIGN KEY (target_book_id) REFERENCES books(book_id) ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  ```
+
+#### Scenario: 数据写入与匹配流程
+- **WHEN** 豆瓣爬虫抓取到某书的also_like列表
+- **THEN** 为列表中的每个书名创建一条`book_also_like`记录
+- **AND** 后续通过精确匹配和模糊匹配填充target_book_id
+
+#### Scenario: books表also_like字段兼容
+- **WHEN** books表中已有also_like JSON字段
+- **THEN** 保留该字段不删除，新数据同时写入books.also_like和book_also_like表
+
+### Requirement: 豆瓣also_like数据采集
+
+系统SHALL扩展豆瓣爬虫以采集"喜欢这本书的人也喜欢"数据。
+
+#### Scenario: 豆瓣also_like数据抓取
+- **WHEN** 爬取豆瓣书籍详情页
+- **THEN** 系统解析页面中"喜欢这本书的人也喜欢"区域的书籍列表
+- **AND** 将书籍名称列表同时写入books.also_like字段和book_also_like表
+
+### Requirement: 领域自适应对齐模块
+
+系统SHALL学习各领域到统一向量空间的线性投影矩阵，消除不同领域书籍BGE向量间的分布偏移，使跨域比较在同一尺度下进行。
+
+#### Scenario: 领域分布偏移分析
+- **WHEN** 系统初始化
+- **THEN** 系统分析各领域书籍BGE向量的分布特征：
+  1. 计算每个领域向量的质心（centroid）
+  2. 计算领域间质心的余弦距离（衡量领域偏移程度）
+  3. 计算每个领域向量的类内散度（衡量领域内一致性）
+  4. 输出领域偏移报告，识别偏移最严重的领域对
+
+#### Scenario: 线性投影矩阵学习（CORAL方法）
+- **WHEN** 执行领域对齐训练
+- **THEN** 系统使用CORAL（Correlation Alignment）方法学习投影矩阵：
+  ```
+  目标：对齐源域和目标域的二阶统计量（协方差矩阵）
+  
+  步骤：
+  1. 计算源域协方差矩阵 C_s 和目标域协方差矩阵 C_t
+  2. 对 C_s 做特征分解：C_s = U_s Σ_s U_s^T
+  3. 对 C_t 做特征分解：C_t = U_t Σ_t U_t^T
+  4. 白化源域：X_s' = X_s U_s Σ_s^(-1/2)
+  5. 重新着色到目标域：X_s'' = X_s' Σ_t^(1/2) U_t^T
+  
+  投影矩阵 A = U_s Σ_s^(-1/2) Σ_t^(1/2) U_t^T
+  ```
+- **AND** 以"综合领域"（所有书籍的混合分布）作为目标域，各专业领域对齐到综合域
+- **AND** 每个领域学习一个768×768的投影矩阵
+
+#### Scenario: 对齐后向量生成
+- **WHEN** 需要计算跨域相似度
+- **THEN** 系统将书籍的BGE向量通过其所属领域的投影矩阵变换：
+  `aligned_embedding = A_domain × BGE_embedding`
+- **AND** 对齐后的向量存入数据库新字段`aligned_embedding`
+
+#### Scenario: 新书对齐处理
+- **WHEN** 新书入库
+- **THEN** 系统根据新书的领域标签，使用对应领域的投影矩阵生成对齐向量
+- **AND** 若新书领域无对应投影矩阵，则对齐向量 = 原始BGE向量（不做变换）
+
+### Requirement: 对比学习跨域对齐模块
+
+系统SHALL利用also_like共现关系构建跨域正样本对，通过对比学习进一步拉近跨域关联书籍的向量，作为线性投影的补充增强。
+
+#### Scenario: 跨域正负样本对构建
+- **WHEN** book_also_like表中存在跨域关联（源书和目标书领域标签不同）
+- **THEN** 系统构建训练样本：
+  - 正样本对：(源书, also_like中的跨域目标书)，标签=1
+  - 负样本对：(源书, 同领域随机采样书)，标签=0
+  - 难负样本对：(源书, 不同领域但无also_like关联的书)，标签=0
+
+#### Scenario: 对比学习训练
+- **WHEN** 执行对比学习对齐训练
+- **THEN** 系统使用InfoNCE损失函数训练投影网络：
+  ```
+  模型：2层MLP，768 → 256 → 768，带LayerNorm和ReLU
+  损失：InfoNCE Loss
+    L = -log(exp(sim(z_i, z_j)/τ) / Σ_k exp(sim(z_i, z_k)/τ))
+    其中 τ=0.07（温度参数），sim为余弦相似度
+  训练参数：lr=1e-4, epochs=50, batch_size=64
+  ```
+- **AND** 训练在CPU上即可完成（MLP参数量小，约20万参数）
+
+#### Scenario: 对比学习嵌入融合
+- **WHEN** 对比学习训练完成
+- **THEN** 系统生成对比学习增强向量：
+  `final_embedding = λ × aligned_embedding + (1-λ) × contrastive_embedding`
+  默认 λ=0.7（线性投影为主，对比学习为辅）
+- **AND** 融合向量存入数据库新字段`final_embedding`
+
+### Requirement: 知识概念桥接模块
+
+系统SHALL基于关键词共现和领域标签关系构建领域间知识概念桥接图谱，提供跨域推荐的结构化解释路径。
+
+#### Scenario: 关键词共现桥接
+- **WHEN** 两个不同领域的书籍共享关键词
+- **THEN** 系统在知识桥接图中创建"领域A --共享关键词--> 领域B"的桥接路径
+- **AND** 桥接强度 = 共享关键词数量 × 关键词权重
+
+#### Scenario: 跨域推荐解释路径生成
+- **WHEN** 用户请求跨域推荐理由
+- **THEN** 系统从知识桥接图中提取源书领域到推荐书领域的桥接路径
+- **AND** 将桥接路径中的共享关键词和中间概念作为推荐理由的结构化依据
+
+### Requirement: 优化后的跨域推荐核心算法（迁移学习版）
+
+系统SHALL在现有相似度计算框架中融入对齐后语义相似度和共现关联度，优化最终得分公式。
+
+#### Scenario: 增强版综合相似度计算
+- **WHEN** 计算源书A与候选书B的推荐得分
+- **THEN** 系统按以下公式计算：
+  ```
+  AlignedSim = Cosine(Aligned_A, Aligned_B)              // 对齐后语义相似度
+  KeywordSim = α × Sim_avg + (1-α) × Sim_max            // 原有关键词相似度
+  CoOccurSim = also_like关联度（从book_also_like表计算）  // 共现关联度
+
+  CombinedSim = a × AlignedSim + (1-a) × KeywordSim      // 综合相似度（用AlignedSim替代SemanticSim）
+  EnhancedSim = w1 × CombinedSim + w2 × CoOccurSim       // 增强相似度
+
+  FinalScore = EnhancedSim × OverlapCoeff                // 最终得分
+  ```
+  默认参数：a=0.6, α=0.4, w1=0.8, w2=0.2
+
+#### Scenario: also_like共现关联度计算
+- **WHEN** 源书A和候选书B之间存在also_like关联
+- **THEN** CoOccurSim从book_also_like表按以下规则计算：
+  - 存在(A→B)且match_type!='unmatched' → CoOccurSim += 1.0 × match_score
+  - 存在(B→A)且match_type!='unmatched' → CoOccurSim += 0.8 × match_score
+  - A和B有共同的target_book_id（Jaccard系数）→ CoOccurSim += Jaccard
+  - 最终CoOccurSim = min(CoOccurSim, 1.0)
+  - 无任何关联 → CoOccurSim = 0.0
+
+#### Scenario: 降级兼容
+- **WHEN** 对齐向量或also_like数据不可用
+- **THEN** 系统自动降级为原有算法（使用原始BGE向量，w2=0），确保推荐服务不中断
+
+### Requirement: 领域关系感知标签系统
+
+系统SHALL升级领域标签系统，使其能够感知领域间的语义关系和交叉边界。
+
+#### Scenario: 领域关系矩阵构建
+- **WHEN** 系统初始化
+- **THEN** 基于书籍的领域标签共现统计构建领域关系矩阵
+- **AND** 计算领域间的关联强度（共现频率归一化）
+
+#### Scenario: 跨域推荐中的领域距离感知
+- **WHEN** 计算重叠标签系数
+- **THEN** 系统不仅考虑重叠标签数量，还考虑领域间的语义距离
+- **AND** 相邻领域的重叠惩罚低于远距离领域
+
+## MODIFIED Requirements
+
+### Requirement: 跨域推荐算法核心
+
+原有公式：
+```
+FinalScore = CombinedSim × OverlapCoeff
+CombinedSim = a × SemanticSim + (1-a) × KeywordSim
+```
+
+修改为：
+```
+FinalScore = EnhancedSim × OverlapCoeff
+EnhancedSim = w1 × CombinedSim + w2 × CoOccurSim
+CombinedSim = a × AlignedSim + (1-a) × KeywordSim
+AlignedSim = Cosine(Aligned_A, Aligned_B)
+```
+
+核心变化：用对齐后的语义相似度AlignedSim替代原始SemanticSim，解决"量尺不准"问题。
+
+新增参数（配置于config.json）：
+| 参数 | 默认值 | 含义 |
+|------|--------|------|
+| w1 | 0.8 | 综合相似度权重 |
+| w2 | 0.2 | 共现关联度权重 |
+| coral_target | 'union' | CORAL目标域（'union'=综合域） |
+| contrastive_lambda | 0.7 | 线性投影与对比学习融合比例 |
+| contrastive_temperature | 0.07 | InfoNCE温度参数 |
+| contrastive_lr | 1e-4 | 对比学习学习率 |
+| contrastive_epochs | 50 | 对比学习训练轮数 |
+
+### Requirement: 豆瓣爬虫数据采集
+
+原有：also_like字段硬编码为空列表`[]`
+
+修改为：解析豆瓣页面"喜欢这本书的人也喜欢"区域，提取关联书名列表，同时写入books.also_like和book_also_like表
+
+### Requirement: 数据库表结构
+
+**表A（books）新增字段：**
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| aligned_embedding | JSON | 768维对齐后向量（CORAL投影后） |
+| final_embedding | JSON | 768维融合向量（λ×对齐 + (1-λ)×对比学习） |
+
+**表B（book_also_like）新建表**（结构见上方Requirement）
+
+**新增配置文件：**
+| 文件 | 说明 |
+|------|------|
+| `algorithms/models/domain_projections.json` | 各领域的768×768投影矩阵 |
+| `algorithms/models/contrastive_model.pt` | 对比学习MLP模型权重 |
+
+## REMOVED Requirements
+
+无移除需求。所有现有功能保持向后兼容，新增模块为可选增强。

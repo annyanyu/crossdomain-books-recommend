@@ -1,0 +1,43 @@
+- [ ] 豆瓣爬虫能正确解析"喜欢这本书的人也喜欢"区域，提取关联书名列表
+- [ ] also_like字段不再硬编码为空列表，而是存储实际抓取的书名数据
+- [ ] book_also_like关系表正确创建，包含所有必要字段、外键约束和索引
+- [ ] 数据库迁移脚本可正确为已有数据库添加book_also_like表和books表新字段，不丢失现有数据
+- [ ] books表新增aligned_embedding和final_embedding两个JSON字段
+- [ ] books表原有also_like JSON字段保留，新数据同时写入
+- [ ] also_like书名到book_id的映射函数能处理精确匹配和模糊匹配
+- [ ] 映射结果正确更新到book_also_like表的target_book_id、match_type、match_score字段
+- [ ] 领域偏移分析脚本能正确计算各领域质心、领域间余弦距离和类内散度
+- [ ] 领域偏移报告能识别偏移最严重的领域对
+- [ ] CORAL对齐算法能正确计算源域和目标域协方差矩阵
+- [ ] 白化和重新着色步骤正确实现，生成768×768投影矩阵
+- [ ] 每个领域的投影矩阵保存到domain_projections.json
+- [ ] 批量对齐向量正确写入数据库aligned_embedding字段
+- [ ] 对比学习正负样本对构建正确（跨域正样本、同域负样本、难负样本）
+- [ ] 2层MLP投影网络（768→256→768）正确实现
+- [ ] InfoNCE损失函数正确实现（τ=0.07）
+- [ ] 对比学习训练在CPU上可正常执行（lr=1e-4, epochs=50）
+- [ ] 对比学习模型保存到contrastive_model.pt
+- [ ] 融合向量正确生成：final_embedding = λ×aligned + (1-λ)×contrastive（λ=0.7）
+- [ ] 融合向量正确写入数据库final_embedding字段
+- [ ] DomainAligner类能加载投影矩阵和对比学习模型
+- [ ] 在线对齐推理正确：根据领域标签选择投影矩阵
+- [ ] 新书入库时能实时生成对齐向量
+- [ ] recommender.py中用AlignedSim替代SemanticSim
+- [ ] recommender.py中新增CoOccurSim计算（从book_also_like表查询）
+- [ ] 最终得分公式正确：FinalScore = EnhancedSim × OverlapCoeff
+- [ ] EnhancedSim = w1 × CombinedSim + w2 × CoOccurSim
+- [ ] 降级兼容逻辑正确：aligned_embedding为NULL时使用原始BGE向量
+- [ ] config.json新增w1/w2/coral/contrastive相关参数
+- [ ] 推荐API响应中包含AlignedSim和CoOccurSim等新增指标
+- [ ] KnowledgeBridge类能构建关键词共现桥接图
+- [ ] 领域关系矩阵基于领域标签共现统计正确构建
+- [ ] 跨域推荐解释路径提取功能正常
+- [ ] 桥接路径信息能传递给LLM推荐理由生成模块
+- [ ] 领域关系矩阵正确构建，重叠标签系数融入领域距离因子
+- [ ] LLM推荐理由Prompt模板融入知识桥接路径信息
+- [ ] 推荐API响应中包含bridge_keywords字段
+- [ ] 前端能展示桥接关键词
+- [ ] 离线处理流水线脚本可端到端执行
+- [ ] 优化后推荐质量指标不低于优化前
+- [ ] 降级兼容性验证通过
+- [ ] 领域偏移分析显示对齐后跨域相似度分布明显改善

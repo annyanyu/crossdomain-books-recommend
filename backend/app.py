@@ -28,6 +28,7 @@ from app.services.ranker import MultiObjectiveRanker
 from app.services.llm_service import create_llm_service, get_cached_reason, TemplateLLM
 from app.services.douban_scraper import DoubanScraper
 from app.services.book_processor import BookProcessor
+from app.services.also_like_mapper import AlsoLikeMapper
 
 app = Flask(__name__)
 CORS(app)
@@ -595,6 +596,39 @@ def add_book():
             new_book_id = result.lastrowid
 
         logger.info(f"[新书添加] 数据库写入成功: book_id={new_book_id}")
+
+        # 写入 also_like 关系到 book_also_like 表
+        # 兼容多种also_like格式：JSON数组、管道符分隔字符串、Python列表
+        _also_like_raw = processed_data.get('also_like', [])
+        also_like_list = []
+        if isinstance(_also_like_raw, list):
+            also_like_list = [str(item).strip() for item in _also_like_raw if str(item).strip()]
+        elif isinstance(_also_like_raw, str):
+            _raw = _also_like_raw.strip()
+            if _raw:
+                try:
+                    _parsed = json.loads(_raw)
+                    if isinstance(_parsed, list):
+                        also_like_list = [str(item).strip() for item in _parsed if str(item).strip()]
+                except (json.JSONDecodeError, TypeError):
+                    if '|' in _raw:
+                        also_like_list = [name.strip() for name in _raw.split('|') if name.strip()]
+                    else:
+                        also_like_list = [_raw]
+        if also_like_list:
+            try:
+                mapper = AlsoLikeMapper(engine)
+                mapper.build_title_index()
+                with engine.begin() as conn:
+                    for book_name in also_like_list:
+                        match_result = mapper.match_book_name(book_name)
+                        conn.execute(
+                            text("INSERT INTO book_also_like (source_book_id, target_book_id, target_book_name, match_type, match_score) VALUES (:sid, :tid, :tname, :mtype, :mscore)"),
+                            {'sid': new_book_id, 'tid': match_result['target_book_id'], 'tname': book_name, 'mtype': match_result['match_type'], 'mscore': match_result['match_score']}
+                        )
+                logger.info(f"[新书添加] also_like关系写入: {len(also_like_list)}条")
+            except Exception as e:
+                logger.warning(f"[新书添加] also_like关系写入失败（不影响数据入库）: {e}")
 
         try:
             recommender, _ = get_recommender()

@@ -44,6 +44,13 @@ class BookProcessor:
         self._domain_tags_path = domain_tags_path
         self._corpus_texts_cache = None
         self._embedding_generator = None
+        self._title_match_rules = None
+        self._idf_cache = {}
+
+        self._level_weights = {'core': 5.0, 'feature': 2.0, 'general': 0.5, 'core_en': 5.0}
+        self._title_weight = 3.0
+        self._min_score_threshold = 3.0
+        self._second_tag_ratio = 0.3
 
     def process_new_book(self, book_data: Dict) -> Dict:
         """
@@ -304,40 +311,100 @@ class BookProcessor:
     # ==================== 领域标签分配（与 assign_domain_tags.py 一致） ====================
 
     def _assign_domain_tags(self, book_data: Dict, max_domains: int = 2) -> List[str]:
-        """
-        领域标签分配（与 assign_domain_tags.py 的 assign_domain_tags 逻辑完全一致）
-        输入：title + books_intro + author_intro
-        匹配方式：关键词计数
-        输出：最多2个领域标签，全部为0返回["其他"]
-        """
         domain_keywords = self._get_domain_keywords()
+        title_match = self._check_title_match(book_data.get('title', ''))
+        if title_match is not None:
+            return title_match
 
         title = book_data.get('title', '')
         intro = book_data.get('books_intro', '') or book_data.get('book_intro', '')
         author_intro = book_data.get('author_intro', '')
 
-        combined_text = f"{title} {intro} {author_intro}"
-        processed_text = self._preprocess_text(combined_text).lower()
+        title_processed = self._preprocess_text(title).lower()
+        intro_processed = self._preprocess_text(intro).lower()
+        author_processed = self._preprocess_text(author_intro).lower()
 
-        if not processed_text:
+        combined_text = f"{intro_processed} {author_processed}"
+
+        if not combined_text.strip() and not title_processed.strip():
             return ["其他"]
+
+        is_english = self._is_english_text(f"{title_processed} {combined_text}")
 
         scores = {}
-        for domain_name, keywords in domain_keywords.items():
-            score = sum(processed_text.count(kw.lower()) for kw in keywords)
+        for domain_name, kw_dict in domain_keywords.items():
+            score = self._calculate_domain_score(combined_text, title_processed, kw_dict, is_english)
             scores[domain_name] = score
 
+        return self._get_top_domains(scores, max_domains)
+
+    def _calculate_domain_score(self, text: str, title_text: str,
+                                kw_dict: Dict, is_english: bool) -> float:
+        score = 0.0
+        levels = ['core_en', 'feature'] if is_english else ['core', 'feature', 'general']
+
+        for level in levels:
+            keywords = kw_dict.get(level, [])
+            if not keywords:
+                continue
+            weight = self._level_weights.get(level, 1.0)
+            for keyword in keywords:
+                kw_lower = keyword.lower()
+                count_title = title_text.count(kw_lower)
+                count_body = text.count(kw_lower)
+                title_boost = count_title * (self._title_weight - 1.0)
+                body_count = count_body + count_title
+                idf = self._idf_cache.get(kw_lower, 1.0)
+                score += weight * idf * (body_count + title_boost)
+        return score
+
+    def _is_english_text(self, text: str) -> bool:
+        latin = len(re.findall(r'[a-zA-Z]', text))
+        chinese = len(re.findall(r'[\u4e00-\u9fa5]', text))
+        total = latin + chinese
+        if total == 0:
+            return False
+        return latin / total > 0.6
+
+    def _check_title_match(self, title: str) -> Optional[List[str]]:
+        rules = self._get_title_match_rules()
+        if not rules:
+            return None
+        for pattern, tags in rules.items():
+            if pattern in title.strip():
+                return tags
+        return None
+
+    def _get_title_match_rules(self) -> Dict:
+        if self._title_match_rules is not None:
+            return self._title_match_rules
+        rules_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+            'algorithms', 'scripts', 'title_match_rules.json'
+        )
+        if os.path.exists(rules_path):
+            with open(rules_path, 'r', encoding='utf-8') as f:
+                self._title_match_rules = json.load(f)
+        else:
+            self._title_match_rules = {}
+        return self._title_match_rules
+
+    def _get_top_domains(self, scores: Dict[str, float], max_domains: int = 2) -> List[str]:
         sorted_domains = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         valid_domains = [(d, s) for d, s in sorted_domains if s > 0]
-        top_domains = [d for d, s in valid_domains[:max_domains]]
-
-        if not top_domains:
+        if not valid_domains:
             return ["其他"]
+        top_domain, top_score = valid_domains[0]
+        if top_score < self._min_score_threshold:
+            return ["其他"]
+        threshold = max(self._min_score_threshold, self._second_tag_ratio * top_score)
+        result = [top_domain]
+        for domain, score in valid_domains[1:max_domains]:
+            if score >= threshold:
+                result.append(domain)
+        return result
 
-        return top_domains
-
-    def _get_domain_keywords(self) -> Dict[str, List[str]]:
-        """加载领域标签配置（与 assign_domain_tags.py 使用同一配置文件）"""
+    def _get_domain_keywords(self) -> Dict[str, Dict[str, List[str]]]:
         if self._domain_keywords is not None:
             return self._domain_keywords
 
@@ -350,7 +417,7 @@ class BookProcessor:
 
         if not os.path.exists(config_path):
             logger.warning(f"[书籍处理] 领域标签配置文件不存在: {config_path}，使用默认标签")
-            self._domain_keywords = {"其他": ["图书", "书籍"]}
+            self._domain_keywords = {"其他": {"core": ["图书", "书籍"], "feature": [], "general": [], "core_en": []}}
             return self._domain_keywords
 
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -359,8 +426,16 @@ class BookProcessor:
         domain_keywords = {}
         for domain_info in config:
             domain_name = domain_info['domain']
-            keywords = domain_info.get('keywords', [])
-            domain_keywords[domain_name] = keywords
+            kw = domain_info.get('keywords', {})
+            if isinstance(kw, list):
+                domain_keywords[domain_name] = {'core': kw, 'feature': [], 'general': [], 'core_en': []}
+            elif isinstance(kw, dict):
+                domain_keywords[domain_name] = {
+                    'core': kw.get('core', []),
+                    'feature': kw.get('feature', []),
+                    'general': kw.get('general', []),
+                    'core_en': kw.get('core_en', []),
+                }
 
         self._domain_keywords = domain_keywords
         return domain_keywords

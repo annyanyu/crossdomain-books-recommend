@@ -1,0 +1,41 @@
+- [ ] 豆瓣爬虫能正确解析"喜欢这本书的人也喜欢"区域，提取关联书名列表
+- [ ] also_like字段不再硬编码为空列表，而是存储实际抓取的书名数据
+- [ ] book_also_like关系表正确创建，包含relation_id、source_book_id、target_book_id、target_book_name、match_type、match_score、weight、created_at字段
+- [ ] book_also_like表的外键约束正确：fk_also_like_source → books(book_id) ON DELETE CASCADE、fk_also_like_target → books(book_id) ON DELETE SET NULL
+- [ ] book_also_like表的唯一约束正确：uk_source_target(source_book_id, target_book_name)
+- [ ] book_also_like表的索引正确：idx_source_book、idx_target_book、idx_match_type
+- [ ] 数据库迁移脚本可正确为已有数据库添加book_also_like表和books表新字段，不丢失现有数据
+- [ ] books表新增graph_embedding和enhanced_embedding两个JSON字段
+- [ ] books表原有also_like JSON字段保留，新数据同时写入books.also_like和book_also_like表
+- [ ] also_like书名到book_id的映射函数能处理精确匹配(exact)和模糊匹配(fuzzy)两种情况
+- [ ] 映射结果正确更新到book_also_like表的target_book_id、match_type、match_score字段
+- [ ] 批量映射脚本能查询match_type='unmatched'的记录并尝试匹配
+- [ ] BookGraph类能基于book_also_like表中match_type IN ('exact','fuzzy')的记录构建共现边
+- [ ] BookGraph类能基于语义相似度构建隐式边（阈值过滤）
+- [ ] 图数据能序列化存储和反序列化加载
+- [ ] 图的增量更新接口在新书入库时正确添加节点和边
+- [ ] 服务启动时预加载图数据，新书入库时自动增量更新
+- [ ] Node2Vec图嵌入生成128维向量，参数配置正确
+- [ ] 增强向量拼接逻辑正确：768维BGE + 128维GraphEmb → 896维enhanced_embedding
+- [ ] graph_embedding和enhanced_embedding正确写入books表
+- [ ] 新书入库时能实时生成图嵌入（或标记为待处理）
+- [ ] KnowledgeBridge类能构建关键词共现桥接图
+- [ ] 领域关系矩阵基于领域标签共现统计正确构建
+- [ ] 跨域推荐解释路径提取功能正常（BFS搜索桥接路径）
+- [ ] 桥接路径信息能传递给LLM推荐理由生成模块
+- [ ] recommender.py中新增GraphSim计算（图嵌入余弦相似度）
+- [ ] recommender.py中新增CoOccurSim计算（从book_also_like表查询共现关联度）
+- [ ] 最终得分公式正确：FinalScore = EnhancedSim × OverlapCoeff
+- [ ] EnhancedSim = w1 × CombinedSim + w2 × GraphSim + w3 × CoOccurSim
+- [ ] CoOccurSim计算正确：A→B直接关联1.0×match_score，B→A反向关联0.8×match_score，Jaccard共现，截断到[0,1]
+- [ ] 降级兼容逻辑正确：book_also_like表为空或graph_embedding为NULL时自动回退为原算法
+- [ ] config.json新增w1/w2/w3/graph_sim_threshold/node2vec参数
+- [ ] 推荐API响应中包含GraphSim和CoOccurSim等新增指标
+- [ ] 领域关系矩阵正确构建（10×10，基于共现统计）
+- [ ] 重叠标签系数融入领域距离因子，相邻领域惩罚低于远距离领域
+- [ ] LLM推荐理由Prompt模板融入知识桥接路径信息
+- [ ] 推荐API响应中包含bridge_keywords字段
+- [ ] 前端能展示桥接关键词，增强推荐可解释性
+- [ ] 离线处理流水线脚本可端到端执行
+- [ ] 优化后推荐质量指标（Hit Rate、NDCG、多样性）不低于优化前
+- [ ] 降级兼容性验证通过：book_also_like表为空时推荐结果与原算法一致

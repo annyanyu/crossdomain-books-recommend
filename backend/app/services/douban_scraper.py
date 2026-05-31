@@ -163,6 +163,7 @@ class DoubanScraper:
         data['books_intro'] = self._extract_content_intro(soup)
         data['author_intro'] = self._extract_author_intro(soup)
         data['tags'] = self._extract_tags(soup)
+        data['also_like'] = self._extract_also_like(soup)
 
         return data
 
@@ -270,6 +271,42 @@ class DoubanScraper:
                 tags.append(tag_text)
         return tags[:10]
 
+    @staticmethod
+    def _extract_also_like(soup) -> List[str]:
+        """解析豆瓣页面中'喜欢这本书的人也喜欢'区域的书籍列表"""
+        book_names = []
+
+        # 策略1: #db-rec-section 下的 dl.clearfix dd a
+        rec_section = soup.select_one('#db-rec-section')
+        if rec_section:
+            links = rec_section.select('dl.clearfix dd a')
+            for a in links:
+                name = a.get_text(strip=True)
+                if name:
+                    book_names.append(name)
+
+        # 策略2: .recommendations .content a
+        if not book_names:
+            links = soup.select('.recommendations .content a')
+            for a in links:
+                name = a.get_text(strip=True)
+                if name:
+                    book_names.append(name)
+
+        # 策略3: 所有包含"喜欢"文本的 section 中的链接
+        if not book_names:
+            sections = soup.find_all('section')
+            for section in sections:
+                section_text = section.get_text()
+                if '喜欢' in section_text:
+                    links = section.select('a')
+                    for a in links:
+                        name = a.get_text(strip=True)
+                        if name:
+                            book_names.append(name)
+
+        return book_names[:12]
+
     def _clean_data(self, raw_data: Dict) -> Dict:
         """数据清洗与标准化"""
         cleaned = {}
@@ -294,7 +331,7 @@ class DoubanScraper:
         cleaned['author_intro'] = self._clean_text(raw_data.get('author_intro'))
         cleaned['tags'] = raw_data.get('tags', [])
 
-        cleaned['also_like'] = []
+        cleaned['also_like'] = raw_data.get('also_like', [])
         cleaned['short_reviews'] = []
         cleaned['reviews'] = []
         cleaned['reading_notes'] = []

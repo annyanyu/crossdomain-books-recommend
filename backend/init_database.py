@@ -72,17 +72,44 @@ def create_tables(engine):
         embedding JSON COMMENT '语义向量列表',
         keywords_embeddings JSON COMMENT '关键词嵌入向量列表',
         domain_tags JSON COMMENT '领域标签列表',
+        gnn_embedding JSON COMMENT 'GNN嵌入向量',
         INDEX idx_title (title),
         INDEX idx_publisher (publisher),
         INDEX idx_rating (rating)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='图书信息表';
     """
-    
-    with engine.connect() as conn:
+
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS book_also_like"))
         conn.execute(text("DROP TABLE IF EXISTS books"))
         conn.execute(text(create_table_sql))
-    
+
     print("表 'books' 创建成功！")
+
+    # 创建 book_also_like 表
+    create_also_like_sql = """
+    CREATE TABLE IF NOT EXISTS book_also_like (
+        relation_id INT AUTO_INCREMENT PRIMARY KEY COMMENT '关系ID',
+        source_book_id INT NOT NULL COMMENT '源书籍ID',
+        target_book_id INT COMMENT '目标书籍ID（匹配成功时非空）',
+        target_book_name VARCHAR(255) NOT NULL COMMENT '目标书籍名称（豆瓣原始书名）',
+        match_type ENUM('exact', 'fuzzy', 'unmatched') NOT NULL DEFAULT 'unmatched' COMMENT '匹配类型',
+        match_score FLOAT DEFAULT 0.0 COMMENT '匹配得分（0.0~1.0）',
+        weight FLOAT DEFAULT 1.0 COMMENT '关系权重',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+        UNIQUE KEY uk_source_target (source_book_id, target_book_name),
+        INDEX idx_source_book (source_book_id),
+        INDEX idx_target_book (target_book_id),
+        INDEX idx_match_type (match_type),
+        CONSTRAINT fk_also_like_source FOREIGN KEY (source_book_id) REFERENCES books(book_id) ON DELETE CASCADE,
+        CONSTRAINT fk_also_like_target FOREIGN KEY (target_book_id) REFERENCES books(book_id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='喜欢也喜欢关系表';
+    """
+
+    with engine.begin() as conn:
+        conn.execute(text(create_also_like_sql))
+
+    print("表 'book_also_like' 创建成功！")
 
 def generate_sample_data(num_books=100):
     all_domains = load_domain_tags()
