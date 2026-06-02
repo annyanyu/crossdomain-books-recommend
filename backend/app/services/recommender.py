@@ -124,6 +124,15 @@ class CrossDomainRecommender:
         }
         self.books_data.append(new_entry)
         logger.info(f"[推荐器] 新书已加入索引: book_id={book_data['book_id']}, title={book_data.get('title', '')}, 当前总数={len(self.books_data)}")
+
+    def remove_book_from_index(self, book_id: int):
+        original_len = len(self.books_data)
+        self.books_data = [b for b in self.books_data if b.get('book_id') != book_id]
+        removed = original_len - len(self.books_data)
+        if removed > 0:
+            logger.info(f"[推荐器] 已从索引移除: book_id={book_id}, 当前总数={len(self.books_data)}")
+        else:
+            logger.warning(f"[推荐器] 索引中未找到: book_id={book_id}")
     
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         if not vec1 or not vec2:

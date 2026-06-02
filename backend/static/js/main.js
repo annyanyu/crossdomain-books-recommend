@@ -24,6 +24,8 @@ document.addEventListener('DOMContentLoaded', function() {
     loadBooks();
     loadSidebarRecommendations();
 
+    setTimeout(() => updateSliderTooltip(), 100);
+
     document.getElementById('searchInput').addEventListener('keypress', function(e) {
         if (e.key === 'Enter') {
             searchBooks();
@@ -73,34 +75,21 @@ function updateSliderDescription() {
 }
 
 function updateSliderTooltip() {
-    const slider = document.getElementById('betaSlider');
     const tooltip = document.getElementById('sliderTooltip');
-    if (!slider || !tooltip) return;
-
-    const min = parseFloat(slider.min);
-    const max = parseFloat(slider.max);
-    const val = parseFloat(slider.value);
-    const ratio = (val - min) / (max - min);
-
-    const thumbWidth = 18;
-    const sliderWidth = slider.offsetWidth;
-    const trackWidth = sliderWidth - thumbWidth;
-    const thumbCenter = ratio * trackWidth + thumbWidth / 2;
+    if (!tooltip) return;
 
     tooltip.textContent = currentBeta.toFixed(2);
-    tooltip.style.transform = `translateX(${thumbCenter}px) translateX(-50%)`;
 }
 
 async function loadBooks(page = 1) {
     currentPage = page;
     const searchValue = document.getElementById('searchInput').value;
-    const sortMode = document.getElementById('sortMode').value;
     const booksGrid = document.getElementById('booksGrid');
 
     booksGrid.innerHTML = '<div class="loading">加载中...</div>';
 
     try {
-        let url = `/api/books?page=${page}&per_page=${perPage}&sort_mode=${sortMode}`;
+        let url = `/api/books?page=${page}&per_page=${perPage}`;
         if (searchValue) {
             url += `&search=${encodeURIComponent(searchValue)}`;
         }
@@ -206,12 +195,12 @@ function renderBooks(books) {
                 <div class="book-author">${book.authors && book.authors.length > 0 ? book.authors.join(', ') : '未知作者'}</div>
                 <div class="book-meta-row">
                     ${book.rating ? `<span class="book-rating">⭐ ${book.rating}</span>` : ''}
+                    ${book.domain_tags && book.domain_tags.length > 0 ? `
+                        <span class="book-tags">
+                            ${book.domain_tags.slice(0, 3).map(tag => `<span class="tag">${tag}</span>`).join('')}
+                        </span>
+                    ` : ''}
                 </div>
-                ${book.domain_tags && book.domain_tags.length > 0 ? `
-                    <div class="book-tags">
-                        ${book.domain_tags.slice(0, 3).map(tag => `<span class="tag">${tag}</span>`).join('')}
-                    </div>
-                ` : ''}
             </div>
             <div class="book-card-overlay">
                 <button class="card-overlay-btn card-overlay-detail" onclick="event.stopPropagation(); openBookDetail(${book.book_id})">
@@ -305,13 +294,13 @@ async function selectBook(bookId) {
     document.getElementById('defaultPanel').style.display = 'none';
     document.getElementById('recommendPanel').style.display = 'flex';
     document.getElementById('bubbleIntro').style.display = 'none';
+    document.getElementById('booksGridTitle').style.display = 'block';
 
     document.getElementById('leftSection').classList.add('left-section-narrow');
     document.getElementById('rightSection').classList.add('right-section-wide');
 
     setTimeout(() => updateSliderTooltip(), 0);
 
-    document.getElementById('selectedBookCard').innerHTML = '<div class="loading">加载中...</div>';
     document.getElementById('crossDomainRecommendations').innerHTML = '<div class="loading">加载中...</div>';
     document.getElementById('domainDistribution').style.display = 'none';
 
@@ -320,13 +309,10 @@ async function selectBook(bookId) {
         const data = await response.json();
 
         if (data.success) {
-            renderSelectedBookCard(data.data);
             loadRecommendations(bookId);
-        } else {
-            document.getElementById('selectedBookCard').innerHTML = '<div class="loading">加载失败</div>';
         }
     } catch (error) {
-        document.getElementById('selectedBookCard').innerHTML = '<div class="loading">加载失败</div>';
+        console.error(error);
     }
 }
 
@@ -344,45 +330,23 @@ function deselectBook() {
     document.getElementById('defaultPanel').style.display = 'block';
     document.getElementById('recommendPanel').style.display = 'none';
     document.getElementById('bubbleIntro').style.display = 'block';
+    document.getElementById('booksGridTitle').style.display = 'none';
 
     document.getElementById('leftSection').classList.remove('left-section-narrow');
     document.getElementById('rightSection').classList.remove('right-section-wide');
 }
 
-function renderSelectedBookCard(book) {
-    const card = document.getElementById('selectedBookCard');
-    card.innerHTML = `
-        <div class="selected-book-cover">
-            ${book.cover_image
-                ? `<img src="${book.cover_image}" alt="${book.title}"
-                       onerror="this.onerror=null; this.src='${defaultCoverUrl}'; this.alt='封面加载失败';">`
-                : `<img src="${defaultCoverUrl}" alt="暂无封面">`}
-        </div>
-        <div class="selected-book-info">
-            <div class="selected-book-title" title="${book.title}">${book.title}</div>
-            <div class="selected-book-author">${book.authors && book.authors.length > 0 ? book.authors.join(', ') : '未知作者'}</div>
-            <div class="selected-book-meta">
-                ${book.rating ? `<span class="selected-book-rating">⭐ ${book.rating}</span>` : ''}
-                ${book.publisher ? `<span class="selected-book-publisher">${book.publisher}</span>` : ''}
-            </div>
-            ${book.domain_tags && book.domain_tags.length > 0 ? `
-                <div class="selected-book-tags">
-                    ${book.domain_tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
-                </div>
-            ` : ''}
-        </div>
-    `;
-}
-
 async function loadRecommendations(bookId) {
     const crossDomainList = document.getElementById('crossDomainRecommendations');
     const domainDistEl = document.getElementById('domainDistribution');
+    const recommendSortModeEl = document.getElementById('recommendSortMode');
+    const recommendSortMode = recommendSortModeEl ? recommendSortModeEl.value : 'comprehensive';
 
     crossDomainList.innerHTML = '<div class="loading">加载中...</div>';
     domainDistEl.style.display = 'none';
 
     try {
-        const response = await fetch(`/api/recommend/${bookId}?top_k=6&cross_domain=true&beta=${currentBeta}`);
+        const response = await fetch(`/api/recommend/${bookId}?top_k=6&cross_domain=true&beta=${currentBeta}&sort_mode=${recommendSortMode}`);
         const data = await response.json();
 
         if (data.success && data.data.recommendations.length > 0) {
@@ -404,7 +368,8 @@ async function loadRecommendations(bookId) {
             crossDomainList.innerHTML = '<div class="loading">暂无跨域推荐</div>';
         }
     } catch (error) {
-        crossDomainList.innerHTML = '<div class="loading">加载跨域推荐失败</div>';
+        console.error('加载跨域推荐失败:', error);
+        crossDomainList.innerHTML = `<div class="loading">加载跨域推荐失败: ${error.message || '网络错误'}</div>`;
     }
 }
 
@@ -416,7 +381,8 @@ function renderRecommendationItem(book) {
         ? `<span class="rec-overlap ${book.overlap_count === 0 ? 'rec-overlap-full' : 'rec-overlap-partial'}">${book.overlap_count === 0 ? '完全跨域' : '部分跨域'}</span>`
         : '';
 
-    const sortMode = document.getElementById('sortMode').value;
+    const recommendSortModeEl = document.getElementById('recommendSortMode');
+    const sortMode = recommendSortModeEl ? recommendSortModeEl.value : 'comprehensive';
     const displayScore = sortMode === 'similarity'
         ? (book.similarity_score || book.final_score || 0)
         : (book.utility_score || book.final_score || 0);

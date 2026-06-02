@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>图书管理 - 跨域图书推荐系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=28">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/manage.css') }}?v=4">
+</head>
+<body>
+    <aside class="app-sidebar">
+        <div class="sidebar-brand">
+            <span class="sidebar-brand-icon">📚</span>
+            <span class="sidebar-brand-text">跨域图书推荐</span>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="/" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🏠</span>
+                <span class="sidebar-nav-label">首页</span>
+            </a>
+            <a href="/stats" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📊</span>
+                <span class="sidebar-nav-label">统计</span>
+            </a>
+            <a href="/manage" class="sidebar-nav-item active">
+                <span class="sidebar-nav-icon">📖</span>
+                <span class="sidebar-nav-label">管理</span>
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <img src="{{ url_for('static', filename='images/hit_logo.png') }}" alt="哈工大" class="sidebar-hit-logo">
+        </div>
+    </aside>
+
+    <div class="app-main">
+    <main class="main-content">
+        <div class="container">
+            <div class="manage-page-title">
+                <h2>📖 图书信息管理</h2>
+                <p class="manage-page-desc">新增、查询、编辑和删除图书条目</p>
+            </div>
+
+            <div class="manage-toolbar">
+                <div class="manage-search">
+                    <input type="text" id="manageSearchInput" placeholder="搜索图书标题、作者...">
+                    <button onclick="searchManageBooks()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        搜索
+                    </button>
+                </div>
+                <div class="manage-toolbar-right">
+                    <div class="manage-sort">
+                        <label>排序</label>
+                        <select id="manageSortMode" onchange="loadManageBooks(1)">
+                            <option value="book_id">按ID</option>
+                            <option value="rating">按评分</option>
+                            <option value="title">按书名</option>
+                            <option value="newest">按出版日期</option>
+                        </select>
+                    </div>
+                    <button class="add-book-toolbar-btn" onclick="openAddBookModal()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        添加图书
+                    </button>
+                    <div class="batch-import-wrapper">
+                        <button class="batch-import-btn" onclick="openBatchImportModal()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            一键导入
+                        </button>
+                        <div class="batch-import-tooltip">
+                            <div class="batch-import-tooltip-title">一键导入 — 豆瓣新书速递</div>
+                            <div class="batch-import-tooltip-desc">从豆瓣"新书速递"板块批量抓取图书信息并自动导入系统，支持按分类筛选，每页约20本</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="manage-table-wrapper">
+                <table class="manage-table">
+                    <thead>
+                        <tr>
+                            <th class="col-id">ID</th>
+                            <th class="col-cover">封面</th>
+                            <th class="col-title">书名</th>
+                            <th class="col-author">作者</th>
+                            <th class="col-publisher">出版社</th>
+                            <th class="col-rating">评分</th>
+                            <th class="col-tags">领域标签</th>
+                            <th class="col-actions">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="manageTableBody">
+                        <tr><td colspan="8" class="table-loading">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="manage-pagination" id="managePagination"></div>
+        </div>
+    </main>
+    </div>
+
+    <div class="manage-modal-overlay" id="editModal" style="display: none;">
+        <div class="manage-modal">
+            <div class="manage-modal-header">
+                <h3 id="editModalTitle">编辑图书</h3>
+                <button class="manage-modal-close" onclick="closeEditModal()">✕</button>
+            </div>
+            <div class="manage-modal-body">
+                <input type="hidden" id="editBookId">
+                <div class="form-group">
+                    <label>书名</label>
+                    <input type="text" id="editTitle" placeholder="请输入书名">
+                </div>
+                <div class="form-group">
+                    <label>作者（逗号分隔）</label>
+                    <input type="text" id="editAuthors" placeholder="如：张三, 李四">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>出版社</label>
+                        <input type="text" id="editPublisher" placeholder="请输入出版社">
+                    </div>
+                    <div class="form-group">
+                        <label>出版日期</label>
+                        <input type="date" id="editPubDate">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>评分</label>
+                        <input type="number" id="editRating" min="0" max="10" step="0.1" placeholder="0-10">
+                    </div>
+                    <div class="form-group">
+                        <label>领域标签（逗号分隔）</label>
+                        <input type="text" id="editDomainTags" placeholder="如：计算机科学, 心理学">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>内容简介</label>
+                    <textarea id="editBookIntro" rows="4" placeholder="请输入内容简介"></textarea>
+                </div>
+            </div>
+            <div class="manage-modal-footer">
+                <button class="btn-cancel" onclick="closeEditModal()">取消</button>
+                <button class="btn-save" onclick="saveEditBook()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="manage-modal-overlay" id="deleteModal" style="display: none;">
+        <div class="manage-modal manage-modal-sm">
+            <div class="manage-modal-header">
+                <h3>确认删除</h3>
+                <button class="manage-modal-close" onclick="closeDeleteModal()">✕</button>
+            </div>
+            <div class="manage-modal-body">
+                <p class="delete-warning">确定要删除《<span id="deleteBookTitle"></span>》吗？此操作不可恢复。</p>
+            </div>
+            <div class="manage-modal-footer">
+                <button class="btn-cancel" onclick="closeDeleteModal()">取消</button>
+                <button class="btn-delete" onclick="confirmDeleteBook()">删除</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="manage-modal-overlay" id="addBookModal" style="display: none;">
+        <div class="manage-modal manage-modal-sm">
+            <div class="manage-modal-header">
+                <h3>添加图书</h3>
+                <button class="manage-modal-close" onclick="closeAddBookModal()">✕</button>
+            </div>
+            <div class="manage-modal-body">
+                <p class="add-book-hint">输入豆瓣书籍详情页URL，系统将自动采集书籍信息</p>
+                <div class="form-group">
+                    <label>豆瓣URL</label>
+                    <input type="text" id="addDoubanUrl" placeholder="https://book.douban.com/subject/1234567/">
+                </div>
+                <div id="addBookStatus" class="add-book-status-msg" style="display: none;"></div>
+            </div>
+            <div class="manage-modal-footer">
+                <button class="btn-cancel" onclick="closeAddBookModal()">取消</button>
+                <button class="btn-save" id="addBookSubmitBtn" onclick="submitAddBook()">添加</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="manage-modal-overlay" id="batchImportModal" style="display: none;">
+        <div class="manage-modal batch-import-modal">
+            <div class="manage-modal-header">
+                <h3>📥 一键导入 — 豆瓣新书速递</h3>
+                <button class="manage-modal-close" onclick="closeBatchImportModal()">✕</button>
+            </div>
+            <div class="manage-modal-body">
+                <div class="batch-import-options" id="batchImportOptions">
+                    <div class="form-group">
+                        <label>分类</label>
+                        <select id="batchSubcat">
+                            <option value="">全部</option>
+                            <option value="文学">文学</option>
+                            <option value="小说">小说</option>
+                            <option value="历史文化">历史文化</option>
+                            <option value="社会纪实">社会纪实</option>
+                            <option value="科学新知">科学新知</option>
+                            <option value="艺术设计">艺术设计</option>
+                            <option value="商业经管">商业经管</option>
+                            <option value="绘本漫画">绘本漫画</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>页数（每页约20本）</label>
+                        <input type="number" id="batchPages" min="1" max="5" value="1" placeholder="1-5">
+                    </div>
+                    <p class="batch-import-hint">系统将从豆瓣新书速递抓取图书信息并自动导入，每本间隔3-6秒防止触发反爬</p>
+                </div>
+
+                <div class="batch-progress-area" id="batchProgressArea" style="display: none;">
+                    <div class="batch-progress-header">
+                        <span class="batch-progress-text" id="batchProgressText">准备中...</span>
+                        <span class="batch-progress-count" id="batchProgressCount">0/0</span>
+                    </div>
+                    <div class="batch-progress-bar-bg">
+                        <div class="batch-progress-bar-fill" id="batchProgressBar" style="width: 0%"></div>
+                    </div>
+                    <div class="batch-log" id="batchLog"></div>
+                </div>
+
+                <div class="batch-summary" id="batchSummary" style="display: none;">
+                    <div class="batch-summary-title">导入完成</div>
+                    <div class="batch-summary-stats">
+                        <div class="batch-stat batch-stat-success">
+                            <span class="batch-stat-num" id="batchStatSuccess">0</span>
+                            <span class="batch-stat-label">成功</span>
+                        </div>
+                        <div class="batch-stat batch-stat-duplicate">
+                            <span class="batch-stat-num" id="batchStatDuplicate">0</span>
+                            <span class="batch-stat-label">重复</span>
+                        </div>
+                        <div class="batch-stat batch-stat-error">
+                            <span class="batch-stat-num" id="batchStatError">0</span>
+                            <span class="batch-stat-label">失败</span>
+                        </div>
+                    </div>
+                    <div class="batch-error-detail" id="batchErrorDetail" style="display: none;">
+                        <div class="batch-error-toggle" onclick="toggleBatchErrors()">查看失败详情 ▾</div>
+                        <div class="batch-error-list" id="batchErrorList" style="display: none;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="manage-modal-footer">
+                <button class="btn-cancel" onclick="closeBatchImportModal()" id="batchCancelBtn">取消</button>
+                <button class="btn-save" onclick="startBatchImport()" id="batchStartBtn">开始导入</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/manage.js') }}?v=2"></script>
+</body>
+</html>

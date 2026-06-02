@@ -27,10 +27,10 @@
   - [ ] SubTask 4.6: 在app.py服务启动时预加载图数据
 
 - [ ] Task 5: LightGCN模型训练（青椒云GPU环境）
-  - [ ] SubTask 5.1: 编写数据导出脚本，从数据库导出图结构（邻接表）和BGE向量
-  - [ ] SubTask 5.2: 创建algorithms/scripts/train_gnn_model.py，实现LightGCN模型
-  - [ ] SubTask 5.3: 实现BPR损失函数和训练循环（lr=0.01, epochs=200, n_layers=2, embedding_dim=128）
-  - [ ] SubTask 5.4: 实现模型验证逻辑（每10 epoch验证，保存最优模型）
+  - [ ] SubTask 5.1: 编写数据导出脚本，从数据库导出图结构（邻接表）和BGE向量，打包为gnn_training_data.tar.gz
+  - [ ] SubTask 5.2: 创建algorithms/scripts/train_gnn_model.py，实现LightGCN模型（2层消息传递+层聚合+768→128投影）
+  - [ ] SubTask 5.3: 实现BPR损失函数和训练循环（Adam优化器，lr=0.01，StepLR调度，权重衰减1e-5，早停策略）
+  - [ ] SubTask 5.4: 实现模型验证逻辑（每10 epoch验证NDCG@10，保存最优模型）
   - [ ] SubTask 5.5: 编写GNN嵌入导出脚本，将训练结果导入数据库gnn_embedding字段
   - [ ] SubTask 5.6: 编写青椒云环境部署文档（依赖安装、数据传输、训练执行流程）
 
@@ -68,8 +68,9 @@
 
 - [ ] Task 11: 离线数据批量处理与验证
   - [ ] SubTask 11.1: 编写完整离线处理流水线脚本
-  - [ ] SubTask 11.2: 对比优化前后的推荐质量指标
+  - [ ] SubTask 11.2: 对比优化前后的推荐质量指标（Hit Rate@10、NDCG@10、跨域覆盖率、多样性）
   - [ ] SubTask 11.3: 验证降级兼容性
+  - [ ] SubTask 11.4: 验证在线推理性能（P95延迟≤200ms）
 
 # Task Dependencies
 

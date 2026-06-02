@@ -378,3 +378,187 @@ class DoubanScraper:
             return f'{match.group(1)}-01-01'
 
         return None
+
+    LATEST_URL = 'https://book.douban.com/latest'
+    SUBCATEGORIES = [
+        '全部', '文学', '小说', '历史文化', '社会纪实',
+        '科学新知', '艺术设计', '商业经管', '绘本漫画',
+    ]
+
+    def scrape_latest_books(self, subcat: Optional[str] = None, max_pages: int = 1) -> Dict:
+        """
+        爬取豆瓣新书速递列表页，提取图书详情页URL和基本信息
+
+        参数:
+            subcat: 分类名称，如"文学"、"小说"等，None或"全部"表示不限分类
+            max_pages: 抓取页数，最大5页
+
+        返回:
+            {"total": int, "books": [{"detail_url": str, "title": str, ...}, ...]}
+
+        异常:
+            RuntimeError: 列表页请求失败或触发验证码
+        """
+        import random
+
+        max_pages = min(max(1, max_pages), 5)
+        all_books = []
+        seen_urls = set()
+
+        for page in range(1, max_pages + 1):
+            params = {'p': page}
+            if subcat and subcat != '全部':
+                params['subcat'] = subcat
+
+            url = self.LATEST_URL
+            if params:
+                query = '&'.join(f'{k}={v}' for k, v in params.items())
+                url = f'{self.LATEST_URL}?{query}'
+
+            logger.info(f"[新书速递] 抓取第{page}页: {url}")
+
+            if page > 1:
+                delay = random.uniform(2, 4)
+                time.sleep(delay)
+
+            html = self._fetch_page(url)
+            if self._is_captcha_page(html):
+                raise RuntimeError('豆瓣暂时限制访问（触发验证码），请稍后重试')
+
+            books = self._parse_latest_page(html)
+            for book in books:
+                if book['detail_url'] not in seen_urls:
+                    seen_urls.add(book['detail_url'])
+                    all_books.append(book)
+
+            logger.info(f"[新书速递] 第{page}页解析到{len(books)}本书，累计{len(all_books)}本")
+
+        return {'total': len(all_books), 'books': all_books}
+
+    def _parse_latest_page(self, html: str) -> List[Dict]:
+        """解析新书速递列表页HTML，提取每本书的详情URL和基本信息"""
+        soup = BeautifulSoup(html, 'lxml')
+        books = []
+
+        items = soup.select('#content .grid-168 .media')
+        if not items:
+            items = soup.select('#content .grid-16-8 .media')
+        if not items:
+            items = soup.select('.article .media')
+
+        for item in items:
+            book = self._parse_latest_item(item)
+            if book and book.get('detail_url'):
+                books.append(book)
+
+        if not books:
+            books = self._parse_latest_fallback(soup)
+
+        return books
+
+    @staticmethod
+    def _parse_latest_item(item) -> Optional[Dict]:
+        """解析单个书籍条目"""
+        book = {
+            'detail_url': '',
+            'title': '',
+            'cover_image': '',
+            'rating': None,
+            'authors': [],
+            'publisher': '',
+            'publication_date': '',
+        }
+
+        title_el = item.select_one('a.fleft')
+        if not title_el:
+            title_el = item.select_one('h2 a')
+        if not title_el:
+            title_el = item.select_one('.title a')
+        if not title_el:
+            return None
+
+        href = title_el.get('href', '')
+        if '/subject/' not in href:
+            return None
+
+        if href.startswith('http'):
+            book['detail_url'] = href.rstrip('/')
+        else:
+            book['detail_url'] = f'https://book.douban.com{href}'.rstrip('/')
+
+        book['title'] = title_el.get_text(strip=True)
+
+        cover_el = item.select_one('img')
+        if cover_el:
+            book['cover_image'] = cover_el.get('src') or cover_el.get('data-src') or ''
+
+        rating_el = item.select_one('.rating-value')
+        if not rating_el:
+            rating_el = item.select_one('.rating_nums')
+        if rating_el:
+            try:
+                book['rating'] = float(rating_el.get_text(strip=True))
+            except (ValueError, TypeError):
+                pass
+
+        meta_el = item.select_one('.meta')
+        if not meta_el:
+            meta_el = item.select_one('.color-gray')
+        if meta_el:
+            meta_text = meta_el.get_text(strip=True)
+            parts = [p.strip() for p in re.split(r'[/｜|]', meta_text) if p.strip()]
+            author_parts = []
+            for part in parts:
+                if re.match(r'\d{4}', part):
+                    date_match = re.match(r'(\d{4}[-/年]\d{1,2}[-/月]?\d{0,2}日?)', part)
+                    if date_match:
+                        book['publication_date'] = date_match.group(1)
+                elif re.search(r'出版社|出版集团', part):
+                    book['publisher'] = re.sub(r'^[\s/]+', '', part)
+                elif not re.match(r'^[\d.]+元', part) and not re.match(r'^(平装|精装| Hardcover|Paperback)', part, re.IGNORECASE):
+                    author_parts.append(part)
+            if author_parts:
+                book['authors'] = [a.strip() for a in re.split(r'[,，、]', author_parts[0]) if a.strip()]
+
+        return book
+
+    @staticmethod
+    def _parse_latest_fallback(soup) -> List[Dict]:
+        """备用解析策略：从页面中所有包含 /subject/ 的链接提取"""
+        books = []
+        seen = set()
+
+        for a in soup.select('a[href*="/subject/"]'):
+            href = a.get('href', '')
+            if '/subject/' not in href:
+                continue
+
+            if href.startswith('http'):
+                detail_url = href.rstrip('/')
+            else:
+                detail_url = f'https://book.douban.com{href}'.rstrip('/')
+
+            subject_match = re.search(r'/subject/(\d+)', detail_url)
+            if not subject_match:
+                continue
+
+            douban_id = subject_match.group(1)
+            if douban_id in seen:
+                continue
+            seen.add(douban_id)
+
+            title = a.get_text(strip=True)
+            if not title or len(title) > 100:
+                continue
+
+            books.append({
+                'detail_url': detail_url,
+                'title': title,
+                'cover_image': '',
+                'rating': None,
+                'authors': [],
+                'publisher': '',
+                'publication_date': '',
+            })
+
+        return books

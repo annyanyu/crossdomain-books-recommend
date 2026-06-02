@@ -17,7 +17,9 @@ import os
 import sys
 import json
 import logging
-from flask import Flask, render_template, jsonify, request
+import random
+import time
+from flask import Flask, render_template, jsonify, request, Response
 from flask_cors import CORS
 
 from sqlalchemy import create_engine, text
@@ -143,6 +145,124 @@ def _check_duplicate(book_data: dict, engine) -> tuple:
                 return True, result[0]
 
     return False, None
+
+def _process_and_add_book(douban_url: str, engine, scraper=None, processor=None):
+    """
+    公共方法：爬取→去重→处理→入库→索引
+    供单本添加和批量导入共用
+
+    返回:
+        dict: {"status": "success"|"duplicate"|"error", "book_id": int, "title": str, "message": str}
+    """
+    if scraper is None:
+        scraper = get_douban_scraper()
+    if processor is None:
+        processor = get_book_processor()
+
+    is_valid, result = DoubanScraper.validate_url(douban_url)
+    if not is_valid:
+        return {'status': 'error', 'message': result}
+
+    book_data = scraper.scrape_book(douban_url)
+    title = book_data.get('title', '未知')
+
+    is_dup, existing_id = _check_duplicate(book_data, engine)
+    if is_dup:
+        return {'status': 'duplicate', 'book_id': existing_id, 'title': title, 'message': f'该书籍已在系统中存在（ID: {existing_id}）'}
+
+    processed_data = processor.process_new_book(book_data)
+
+    authors_json = processed_data.get('authors', [])
+    if isinstance(authors_json, list):
+        authors_json = json.dumps(authors_json, ensure_ascii=False)
+
+    insert_query = text("""
+        INSERT INTO books (
+            title, cover_image, authors, publisher, publication_date, rating,
+            URL, book_intro, also_like,
+            keywords, embedding, keywords_embeddings, domain_tags
+        ) VALUES (
+            :title, :cover_image, :authors, :publisher, :publication_date, :rating,
+            :url, :book_intro, :also_like,
+            :keywords, :embedding, :keywords_embeddings, :domain_tags
+        )
+    """)
+
+    insert_params = {
+        'title': processed_data.get('title', ''),
+        'cover_image': processed_data.get('cover_image'),
+        'authors': authors_json,
+        'publisher': processed_data.get('publisher'),
+        'publication_date': processed_data.get('publication_date'),
+        'rating': processed_data.get('rating'),
+        'url': processed_data.get('URL'),
+        'book_intro': processed_data.get('books_intro'),
+        'also_like': json.dumps(processed_data.get('also_like', []), ensure_ascii=False) if isinstance(processed_data.get('also_like'), list) else processed_data.get('also_like', '[]'),
+        'keywords': processed_data.get('keywords', '[]'),
+        'embedding': processed_data.get('embedding', '[]'),
+        'keywords_embeddings': processed_data.get('keywords_embeddings', '[]'),
+        'domain_tags': processed_data.get('domain_tags', '[]'),
+    }
+
+    with engine.begin() as conn:
+        result = conn.execute(insert_query, insert_params)
+        new_book_id = result.lastrowid
+
+    _also_like_raw = processed_data.get('also_like', [])
+    also_like_list = []
+    if isinstance(_also_like_raw, list):
+        also_like_list = [str(item).strip() for item in _also_like_raw if str(item).strip()]
+    elif isinstance(_also_like_raw, str):
+        _raw = _also_like_raw.strip()
+        if _raw:
+            try:
+                _parsed = json.loads(_raw)
+                if isinstance(_parsed, list):
+                    also_like_list = [str(item).strip() for item in _parsed if str(item).strip()]
+            except (json.JSONDecodeError, TypeError):
+                if '|' in _raw:
+                    also_like_list = [name.strip() for name in _raw.split('|') if name.strip()]
+                else:
+                    also_like_list = [_raw]
+    if also_like_list:
+        try:
+            mapper = AlsoLikeMapper(engine)
+            mapper.build_title_index()
+            with engine.begin() as conn:
+                for book_name in also_like_list:
+                    match_result = mapper.match_book_name(book_name)
+                    conn.execute(
+                        text("INSERT INTO book_also_like (source_book_id, target_book_id, target_book_name, match_type, match_score) VALUES (:sid, :tid, :tname, :mtype, :mscore)"),
+                        {'sid': new_book_id, 'tid': match_result['target_book_id'], 'tname': book_name, 'mtype': match_result['match_type'], 'mscore': match_result['match_score']}
+                    )
+        except Exception as e:
+            logger.warning(f"[书籍入库] also_like关系写入失败: {e}")
+
+    try:
+        recommender, _ = get_recommender()
+        recommender.add_book_to_index({
+            'book_id': new_book_id,
+            'title': processed_data.get('title', ''),
+            'embedding': json.loads(processed_data.get('embedding', '[]')),
+            'keywords_embeddings': json.loads(processed_data.get('keywords_embeddings', '[]')),
+            'domain_tags': json.loads(processed_data.get('domain_tags', '[]')),
+        })
+    except Exception as e:
+        logger.warning(f"[书籍入库] 推荐索引更新失败: {e}")
+
+    try:
+        processor.add_to_corpus_cache(processed_data)
+    except Exception as e:
+        logger.warning(f"[书籍入库] 语料库缓存更新失败: {e}")
+
+    return {
+        'status': 'success',
+        'book_id': new_book_id,
+        'title': processed_data.get('title', ''),
+        'authors': processed_data.get('authors', []),
+        'domain_tags': json.loads(processed_data.get('domain_tags', '[]')),
+        'keywords': json.loads(processed_data.get('keywords', '[]'))[:5],
+    }
 
 @app.route('/')
 def index():
@@ -535,127 +655,29 @@ def add_book():
         if not douban_url:
             return jsonify({'success': False, 'error': '请输入豆瓣书籍详情页URL'}), 400
 
-        is_valid, result = DoubanScraper.validate_url(douban_url)
-        if not is_valid:
-            return jsonify({'success': False, 'error': result}), 400
-
         logger.info(f"[新书添加] 开始处理: URL={douban_url}")
 
-        scraper = get_douban_scraper()
-        book_data = scraper.scrape_book(douban_url)
-        logger.info(f"[新书添加] 爬取完成: 《{book_data.get('title')}》")
-
         engine = get_db_engine()
-        is_dup, existing_id = _check_duplicate(book_data, engine)
-        if is_dup:
-            logger.info(f"[新书添加] 书籍已存在: book_id={existing_id}")
+        result = _process_and_add_book(douban_url, engine)
+
+        if result['status'] == 'duplicate':
             return jsonify({
                 'success': False,
-                'error': f'该书籍已在系统中存在（ID: {existing_id}）',
-                'existing_book_id': existing_id
+                'error': result['message'],
+                'existing_book_id': result['book_id']
             }), 409
 
-        processor = get_book_processor()
-        processed_data = processor.process_new_book(book_data)
-        logger.info(f"[新书添加] 数据处理完成: 《{processed_data.get('title')}》")
-
-        authors_json = processed_data.get('authors', [])
-        if isinstance(authors_json, list):
-            authors_json = json.dumps(authors_json, ensure_ascii=False)
-
-        insert_query = text("""
-            INSERT INTO books (
-                title, cover_image, authors, publisher, publication_date, rating,
-                URL, book_intro, also_like,
-                keywords, embedding, keywords_embeddings, domain_tags
-            ) VALUES (
-                :title, :cover_image, :authors, :publisher, :publication_date, :rating,
-                :url, :book_intro, :also_like,
-                :keywords, :embedding, :keywords_embeddings, :domain_tags
-            )
-        """)
-
-        insert_params = {
-            'title': processed_data.get('title', ''),
-            'cover_image': processed_data.get('cover_image'),
-            'authors': authors_json,
-            'publisher': processed_data.get('publisher'),
-            'publication_date': processed_data.get('publication_date'),
-            'rating': processed_data.get('rating'),
-            'url': processed_data.get('URL'),
-            'book_intro': processed_data.get('books_intro'),
-            'also_like': json.dumps(processed_data.get('also_like', []), ensure_ascii=False) if isinstance(processed_data.get('also_like'), list) else processed_data.get('also_like', '[]'),
-            'keywords': processed_data.get('keywords', '[]'),
-            'embedding': processed_data.get('embedding', '[]'),
-            'keywords_embeddings': processed_data.get('keywords_embeddings', '[]'),
-            'domain_tags': processed_data.get('domain_tags', '[]'),
-        }
-
-        with engine.begin() as conn:
-            result = conn.execute(insert_query, insert_params)
-            new_book_id = result.lastrowid
-
-        logger.info(f"[新书添加] 数据库写入成功: book_id={new_book_id}")
-
-        # 写入 also_like 关系到 book_also_like 表
-        # 兼容多种also_like格式：JSON数组、管道符分隔字符串、Python列表
-        _also_like_raw = processed_data.get('also_like', [])
-        also_like_list = []
-        if isinstance(_also_like_raw, list):
-            also_like_list = [str(item).strip() for item in _also_like_raw if str(item).strip()]
-        elif isinstance(_also_like_raw, str):
-            _raw = _also_like_raw.strip()
-            if _raw:
-                try:
-                    _parsed = json.loads(_raw)
-                    if isinstance(_parsed, list):
-                        also_like_list = [str(item).strip() for item in _parsed if str(item).strip()]
-                except (json.JSONDecodeError, TypeError):
-                    if '|' in _raw:
-                        also_like_list = [name.strip() for name in _raw.split('|') if name.strip()]
-                    else:
-                        also_like_list = [_raw]
-        if also_like_list:
-            try:
-                mapper = AlsoLikeMapper(engine)
-                mapper.build_title_index()
-                with engine.begin() as conn:
-                    for book_name in also_like_list:
-                        match_result = mapper.match_book_name(book_name)
-                        conn.execute(
-                            text("INSERT INTO book_also_like (source_book_id, target_book_id, target_book_name, match_type, match_score) VALUES (:sid, :tid, :tname, :mtype, :mscore)"),
-                            {'sid': new_book_id, 'tid': match_result['target_book_id'], 'tname': book_name, 'mtype': match_result['match_type'], 'mscore': match_result['match_score']}
-                        )
-                logger.info(f"[新书添加] also_like关系写入: {len(also_like_list)}条")
-            except Exception as e:
-                logger.warning(f"[新书添加] also_like关系写入失败（不影响数据入库）: {e}")
-
-        try:
-            recommender, _ = get_recommender()
-            recommender.add_book_to_index({
-                'book_id': new_book_id,
-                'title': processed_data.get('title', ''),
-                'embedding': json.loads(processed_data.get('embedding', '[]')),
-                'keywords_embeddings': json.loads(processed_data.get('keywords_embeddings', '[]')),
-                'domain_tags': json.loads(processed_data.get('domain_tags', '[]')),
-            })
-            logger.info(f"[新书添加] 推荐索引更新成功: book_id={new_book_id}")
-        except Exception as e:
-            logger.warning(f"[新书添加] 推荐索引更新失败（不影响数据入库）: {e}")
-
-        try:
-            processor.add_to_corpus_cache(processed_data)
-        except Exception as e:
-            logger.warning(f"[新书添加] 语料库缓存更新失败: {e}")
+        if result['status'] == 'error':
+            return jsonify({'success': False, 'error': result['message']}), 400
 
         return jsonify({
             'success': True,
             'data': {
-                'book_id': new_book_id,
-                'title': processed_data.get('title', ''),
-                'authors': processed_data.get('authors', []),
-                'domain_tags': json.loads(processed_data.get('domain_tags', '[]')),
-                'keywords': json.loads(processed_data.get('keywords', '[]'))[:5],
+                'book_id': result['book_id'],
+                'title': result['title'],
+                'authors': result.get('authors', []),
+                'domain_tags': result.get('domain_tags', []),
+                'keywords': result.get('keywords', []),
             }
         })
 
@@ -668,6 +690,305 @@ def add_book():
     except Exception as e:
         logger.error(f"[新书添加] 未知错误: {e}", exc_info=True)
         return jsonify({'success': False, 'error': f'系统错误: {str(e)}'}), 500
+
+@app.route('/api/books/batch-import')
+def batch_import_books():
+    """批量导入API（SSE流式响应）：从豆瓣新书速递抓取并逐本导入"""
+    subcat = request.args.get('subcat', '')
+    pages = request.args.get('pages', '1')
+
+    try:
+        pages = min(max(int(pages), 1), 5)
+    except (ValueError, TypeError):
+        pages = 1
+
+    def generate():
+        scraper = DoubanScraper(timeout=15, max_retries=3)
+        engine = get_db_engine()
+        processor = get_book_processor()
+
+        try:
+            yield f"event: start\ndata: {{}}\n\n"
+
+            latest_result = scraper.scrape_latest_books(
+                subcat=subcat if subcat else None,
+                max_pages=pages
+            )
+            books = latest_result['books']
+            total = len(books)
+
+            if total == 0:
+                yield f"event: complete\ndata: {json.dumps({'total': 0, 'success': 0, 'duplicate': 0, 'error': 0, 'errors': [], 'message': '未找到可导入的图书'}, ensure_ascii=False)}\n\n"
+                return
+
+            success_count = 0
+            duplicate_count = 0
+            error_count = 0
+            error_list = []
+
+            for i, book_info in enumerate(books, 1):
+                detail_url = book_info.get('detail_url', '')
+                title = book_info.get('title', '未知')
+
+                if not detail_url:
+                    error_count += 1
+                    error_list.append({'title': title, 'message': '缺少详情页URL'})
+                    progress_data = json.dumps({
+                        'current': i, 'total': total,
+                        'title': title, 'status': 'error',
+                        'message': '缺少详情页URL'
+                    }, ensure_ascii=False)
+                    yield f"event: progress\ndata: {progress_data}\n\n"
+                    continue
+
+                try:
+                    result = _process_and_add_book(detail_url, engine, scraper, processor)
+
+                    if result['status'] == 'success':
+                        success_count += 1
+                        progress_data = json.dumps({
+                            'current': i, 'total': total,
+                            'title': result['title'], 'status': 'success',
+                            'book_id': result['book_id']
+                        }, ensure_ascii=False)
+                    elif result['status'] == 'duplicate':
+                        duplicate_count += 1
+                        progress_data = json.dumps({
+                            'current': i, 'total': total,
+                            'title': title, 'status': 'duplicate',
+                            'message': result['message']
+                        }, ensure_ascii=False)
+                    else:
+                        error_count += 1
+                        error_list.append({'title': title, 'message': result['message']})
+                        progress_data = json.dumps({
+                            'current': i, 'total': total,
+                            'title': title, 'status': 'error',
+                            'message': result['message']
+                        }, ensure_ascii=False)
+
+                    yield f"event: progress\ndata: {progress_data}\n\n"
+
+                except Exception as e:
+                    error_count += 1
+                    err_msg = str(e)
+                    error_list.append({'title': title, 'message': err_msg})
+                    progress_data = json.dumps({
+                        'current': i, 'total': total,
+                        'title': title, 'status': 'error',
+                        'message': err_msg
+                    }, ensure_ascii=False)
+                    yield f"event: progress\ndata: {progress_data}\n\n"
+
+                if i < total:
+                    delay = random.uniform(3, 6)
+                    time.sleep(delay)
+
+            complete_data = json.dumps({
+                'total': total,
+                'success': success_count,
+                'duplicate': duplicate_count,
+                'error': error_count,
+                'errors': error_list,
+            }, ensure_ascii=False)
+            yield f"event: complete\ndata: {complete_data}\n\n"
+
+        except RuntimeError as e:
+            yield f"event: complete\ndata: {json.dumps({'total': 0, 'success': 0, 'duplicate': 0, 'error': 1, 'errors': [{'title': '', 'message': str(e)}], 'message': str(e)}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.error(f"[批量导入] 异常: {e}", exc_info=True)
+            yield f"event: complete\ndata: {json.dumps({'total': 0, 'success': 0, 'duplicate': 0, 'error': 1, 'errors': [{'title': '', 'message': f'系统错误: {str(e)}'}]}, ensure_ascii=False)}\n\n"
+
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+            'Connection': 'keep-alive',
+        }
+    )
+
+@app.route('/stats')
+def stats_page():
+    return render_template('stats.html')
+
+@app.route('/manage')
+def manage_page():
+    return render_template('manage.html')
+
+@app.route('/api/stats/detail', methods=['GET'])
+def get_stats_detail():
+    try:
+        engine = get_db_engine()
+
+        with engine.connect() as conn:
+            total_books = conn.execute(text("SELECT COUNT(*) FROM books")).scalar()
+            avg_rating = conn.execute(text("SELECT AVG(rating) FROM books WHERE rating IS NOT NULL")).scalar()
+
+            from datetime import datetime, timedelta
+            thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            recent_books = conn.execute(
+                text("SELECT COUNT(*) FROM books WHERE publication_date >= :date"),
+                {'date': thirty_days_ago}
+            ).scalar()
+
+            domain_query = text("SELECT domain_tags FROM books WHERE domain_tags IS NOT NULL AND domain_tags != '[]'")
+            result = conn.execute(domain_query)
+            domain_distribution = {}
+            all_tags = set()
+            for row in result:
+                try:
+                    tags = json.loads(row[0])
+                    all_tags.update(tags)
+                    for tag in tags:
+                        domain_distribution[tag] = domain_distribution.get(tag, 0) + 1
+                except:
+                    pass
+
+            total_domains = len(all_tags)
+
+            rating_ranges = [('0-2', 0, 2), ('2-4', 2, 4), ('4-6', 4, 6), ('6-8', 6, 8), ('8-10', 8, 10.1)]
+            rating_distribution = {}
+            for label, low, high in rating_ranges:
+                count = conn.execute(
+                    text("SELECT COUNT(*) FROM books WHERE rating >= :low AND rating < :high"),
+                    {'low': low, 'high': high}
+                ).scalar()
+                rating_distribution[label] = count
+
+            top_rated = conn.execute(text("""
+                SELECT book_id, title, authors, rating, cover_image, domain_tags
+                FROM books WHERE rating IS NOT NULL
+                ORDER BY rating DESC LIMIT 10
+            """)).fetchall()
+
+            top_books = []
+            for row in top_rated:
+                top_books.append({
+                    'book_id': row[0],
+                    'title': row[1],
+                    'authors': safe_json_loads(row[2]),
+                    'rating': row[3],
+                    'cover_image': row[4],
+                    'domain_tags': safe_json_loads(row[5])
+                })
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'total_books': total_books,
+                'avg_rating': round(avg_rating, 2) if avg_rating else 0,
+                'total_domains': total_domains,
+                'recent_books': recent_books,
+                'domain_distribution': domain_distribution,
+                'rating_distribution': rating_distribution,
+                'top_rated_books': top_books
+            }
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/books/<int:book_id>', methods=['PUT'])
+def update_book(book_id):
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': '请求数据为空'}), 400
+
+        engine = get_db_engine()
+        update_fields = []
+        params = {'book_id': book_id}
+
+        field_map = {
+            'title': 'title',
+            'publisher': 'publisher',
+            'publication_date': 'publication_date',
+            'rating': 'rating',
+            'book_intro': 'book_intro',
+        }
+
+        for json_key, db_key in field_map.items():
+            if json_key in data:
+                update_fields.append(f"{db_key} = :{json_key}")
+                params[json_key] = data[json_key]
+
+        if 'authors' in data:
+            authors = data['authors']
+            if isinstance(authors, list):
+                authors = json.dumps(authors, ensure_ascii=False)
+            update_fields.append("authors = :authors")
+            params['authors'] = authors
+
+        if 'domain_tags' in data:
+            tags = data['domain_tags']
+            if isinstance(tags, list):
+                tags = json.dumps(tags, ensure_ascii=False)
+            update_fields.append("domain_tags = :domain_tags")
+            params['domain_tags'] = tags
+
+        if not update_fields:
+            return jsonify({'success': False, 'error': '没有需要更新的字段'}), 400
+
+        with engine.begin() as conn:
+            result = conn.execute(
+                text(f"UPDATE books SET {', '.join(update_fields)} WHERE book_id = :book_id"),
+                params
+            )
+            if result.rowcount == 0:
+                return jsonify({'success': False, 'error': '图书不存在'}), 404
+
+        try:
+            recommender, _ = get_recommender()
+            recommender.remove_book_from_index(book_id)
+            with engine.connect() as conn:
+                row = conn.execute(
+                    text("SELECT book_id, title, embedding, keywords_embeddings, domain_tags FROM books WHERE book_id = :book_id"),
+                    {'book_id': book_id}
+                ).fetchone()
+                if row:
+                    recommender.add_book_to_index({
+                        'book_id': row[0],
+                        'title': row[1],
+                        'embedding': safe_json_loads(row[2]),
+                        'keywords_embeddings': safe_json_loads(row[3]),
+                        'domain_tags': safe_json_loads(row[4]),
+                    })
+        except Exception as e:
+            logger.warning(f"推荐索引更新失败（不影响数据更新）: {e}")
+
+        return jsonify({'success': True, 'data': {'book_id': book_id}})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/books/<int:book_id>', methods=['DELETE'])
+def delete_book(book_id):
+    try:
+        engine = get_db_engine()
+
+        with engine.begin() as conn:
+            result = conn.execute(
+                text("DELETE FROM books WHERE book_id = :book_id"),
+                {'book_id': book_id}
+            )
+            if result.rowcount == 0:
+                return jsonify({'success': False, 'error': '图书不存在'}), 404
+
+        try:
+            recommender, _ = get_recommender()
+            recommender.remove_book_from_index(book_id)
+        except Exception as e:
+            logger.warning(f"推荐索引移除失败（不影响数据删除）: {e}")
+
+        return jsonify({'success': True, 'data': {'book_id': book_id}})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 def preload_recommender():
     print("正在预加载推荐器数据，请稍候...")

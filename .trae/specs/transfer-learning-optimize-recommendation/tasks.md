@@ -25,21 +25,23 @@
   - [ ] SubTask 4.4: 实现领域内类内散度计算
   - [ ] SubTask 4.5: 输出领域偏移报告（识别偏移最严重的领域对）
 
-- [ ] Task 5: CORAL领域自适应对齐训练
-  - [ ] SubTask 5.1: 创建algorithms/scripts/train_domain_aligner.py，实现CORAL对齐算法
-  - [ ] SubTask 5.2: 实现源域和目标域协方差矩阵计算
-  - [ ] SubTask 5.3: 实现白化和重新着色步骤，生成768×768投影矩阵
-  - [ ] SubTask 5.4: 以"综合领域"为目标域，为每个领域学习投影矩阵
-  - [ ] SubTask 5.5: 将投影矩阵保存到algorithms/models/domain_projections.json
-  - [ ] SubTask 5.6: 批量生成所有书籍的对齐向量，写入数据库aligned_embedding字段
+- [ ] Task 5: CORAL领域自适应对齐训练（青椒云GPU环境）
+  - [ ] SubTask 5.1: 编写数据导出脚本，从数据库导出BGE向量和领域标签，打包上传青椒云
+  - [ ] SubTask 5.2: 创建algorithms/scripts/train_domain_aligner.py，实现CORAL对齐算法
+  - [ ] SubTask 5.3: 实现源域和目标域协方差矩阵计算与特征分解
+  - [ ] SubTask 5.4: 实现白化和重新着色步骤，生成768×768投影矩阵
+  - [ ] SubTask 5.5: 以"综合领域"为目标域，为每个领域学习投影矩阵
+  - [ ] SubTask 5.6: 将投影矩阵保存到algorithms/models/domain_projections.json
+  - [ ] SubTask 5.7: 批量生成所有书籍的对齐向量，写入数据库aligned_embedding字段
+  - [ ] SubTask 5.8: 编写青椒云环境部署文档（依赖安装、数据传输、训练执行流程）
 
-- [ ] Task 6: 对比学习跨域对齐训练
+- [ ] Task 6: 对比学习跨域对齐训练（青椒云GPU环境）
   - [ ] SubTask 6.1: 创建algorithms/scripts/train_contrastive_aligner.py
-  - [ ] SubTask 6.2: 实现跨域正负样本对构建（基于book_also_like表）
+  - [ ] SubTask 6.2: 实现跨域正负样本对构建（基于book_also_like表：正样本+同域负样本+难负样本）
   - [ ] SubTask 6.3: 实现2层MLP投影网络（768→256→768，带LayerNorm和ReLU）
-  - [ ] SubTask 6.4: 实现InfoNCE损失函数和训练循环（lr=1e-4, epochs=50, τ=0.07）
+  - [ ] SubTask 6.4: 实现InfoNCE损失函数和训练循环（Adam，lr=1e-4，CosineAnnealingLR，τ=0.07，早停策略）
   - [ ] SubTask 6.5: 保存模型到algorithms/models/contrastive_model.pt
-  - [ ] SubTask 6.6: 批量生成对比学习嵌入，与CORAL对齐向量融合，写入数据库final_embedding字段
+  - [ ] SubTask 6.6: 批量生成对比学习嵌入，与CORAL对齐向量融合（λ=0.7），写入数据库final_embedding字段
 
 - [ ] Task 7: 领域对齐推理与集成
   - [ ] SubTask 7.1: 创建backend/app/services/domain_aligner.py，定义DomainAligner类
@@ -78,9 +80,10 @@
 
 - [ ] Task 12: 离线数据批量处理与验证
   - [ ] SubTask 12.1: 编写完整离线处理流水线脚本（also_like回填 → 映射 → CORAL对齐 → 对比学习 → 算法验证）
-  - [ ] SubTask 12.2: 对比优化前后的推荐质量指标（Hit Rate、NDCG、多样性）
+  - [ ] SubTask 12.2: 对比优化前后的推荐质量指标（Hit Rate@10、NDCG@10、跨域覆盖率、多样性、领域偏移消除度）
   - [ ] SubTask 12.3: 验证降级兼容性（对齐向量不可用时推荐结果与原算法一致）
-  - [ ] SubTask 12.4: 对比领域偏移分析前后跨域相似度分布变化
+  - [ ] SubTask 12.4: 消融实验：分别评估CORAL单独贡献和对比学习增量贡献
+  - [ ] SubTask 12.5: 验证在线推理性能（P95延迟≤200ms，新书对齐延迟≤500ms）
 
 # Task Dependencies
 

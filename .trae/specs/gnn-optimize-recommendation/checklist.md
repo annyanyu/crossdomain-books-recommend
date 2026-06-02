@@ -1,16 +1,17 @@
-- [ ] 豆瓣爬虫能正确解析"喜欢这本书的人也喜欢"区域，提取关联书名列表
-- [ ] also_like字段不再硬编码为空列表，而是存储实际抓取的书名数据
-- [ ] book_also_like关系表正确创建，包含所有必要字段、外键约束和索引
-- [ ] 数据库迁移脚本可正确为已有数据库添加book_also_like表和books表新字段，不丢失现有数据
-- [ ] books表新增gnn_embedding JSON字段
-- [ ] books表原有also_like JSON字段保留，新数据同时写入
-- [ ] also_like书名到book_id的映射函数能处理精确匹配和模糊匹配
-- [ ] 映射结果正确更新到book_also_like表的target_book_id、match_type、match_score字段
+- [x] 豆瓣爬虫能正确解析"喜欢这本书的人也喜欢"区域，提取关联书名列表
+- [x] also_like字段不再硬编码为空列表，而是存储实际抓取的书名数据
+- [x] book_also_like关系表正确创建，包含所有必要字段、外键约束和索引
+- [x] 数据库迁移脚本可正确为已有数据库添加book_also_like表和books表新字段，不丢失现有数据
+- [x] books表新增gnn_embedding JSON字段
+- [x] books表原有also_like JSON字段保留，新数据同时写入
+- [x] also_like书名到book_id的映射函数能处理精确匹配和模糊匹配
+- [x] 映射结果正确更新到book_also_like表的target_book_id、match_type、match_score字段
 - [ ] BookGraph类能基于book_also_like表构建共现边和语义相似边
 - [ ] 图数据能序列化存储和反序列化加载
 - [ ] 图的增量更新接口在新书入库时正确添加节点和边
 - [ ] 服务启动时预加载图数据
-- [ ] LightGCN模型能在青椒云GPU环境正确训练（BPR损失，200 epochs）
+- [ ] LightGCN模型能在青椒云GPU环境正确训练（BPR损失，Adam优化器，StepLR调度，200 epochs，早停策略）
+- [ ] LightGCN模型架构正确：2层消息传递+层聚合(α₀=0.3,α₁=0.3,α₂=0.4)+768→128投影
 - [ ] GNN嵌入导出脚本将128维向量正确写入数据库gnn_embedding字段
 - [ ] 新书入库时能生成临时GNN嵌入（1-hop邻居平均）
 - [ ] recommender.py中新增GNNSim计算（GNN嵌入余弦相似度）
@@ -18,7 +19,7 @@
 - [ ] 最终得分公式正确：FinalScore = EnhancedSim × OverlapCoeff
 - [ ] EnhancedSim = w1 × CombinedSim + w2 × GNNSim + w3 × CoOccurSim
 - [ ] 降级兼容逻辑正确：gnn_embedding为NULL时自动回退为原算法
-- [ ] config.json新增w1/w2/w3/gnn相关参数
+- [ ] config.json新增w1/w2/w3/gnn相关参数（含gnn_layer_weights）
 - [ ] 推荐API响应中包含GNNSim和CoOccurSim等新增指标
 - [ ] KnowledgeBridge类能构建关键词共现桥接图
 - [ ] 领域关系矩阵基于领域标签共现统计正确构建
@@ -29,5 +30,7 @@
 - [ ] 推荐API响应中包含bridge_keywords字段
 - [ ] 前端能展示桥接关键词
 - [ ] 离线处理流水线脚本可端到端执行
-- [ ] 优化后推荐质量指标不低于优化前
+- [ ] 优化后推荐质量指标（Hit Rate@10、NDCG@10、跨域覆盖率、多样性）不低于优化前
 - [ ] 降级兼容性验证通过
+- [ ] 在线推理性能验证：P95延迟≤200ms
+- [ ] 青椒云GPU环境部署文档完整（依赖安装、数据传输、训练执行流程）

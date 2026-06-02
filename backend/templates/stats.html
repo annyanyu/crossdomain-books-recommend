@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>图书统计 - 跨域图书推荐系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=28">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/stats.css') }}?v=2">
+</head>
+<body>
+    <aside class="app-sidebar">
+        <div class="sidebar-brand">
+            <span class="sidebar-brand-icon">📚</span>
+            <span class="sidebar-brand-text">跨域图书推荐</span>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="/" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">🏠</span>
+                <span class="sidebar-nav-label">首页</span>
+            </a>
+            <a href="/stats" class="sidebar-nav-item active">
+                <span class="sidebar-nav-icon">📊</span>
+                <span class="sidebar-nav-label">统计</span>
+            </a>
+            <a href="/manage" class="sidebar-nav-item">
+                <span class="sidebar-nav-icon">📖</span>
+                <span class="sidebar-nav-label">管理</span>
+            </a>
+        </nav>
+        <div class="sidebar-footer">
+            <img src="{{ url_for('static', filename='images/hit_logo.png') }}" alt="哈工大" class="sidebar-hit-logo">
+        </div>
+    </aside>
+
+    <div class="app-main">
+    <main class="main-content">
+        <div class="container">
+            <div class="stats-page-title">
+                <h2>📊 图书统计概览</h2>
+                <p class="stats-page-desc">系统藏书数据全景视图</p>
+            </div>
+
+            <div class="stats-overview" id="statsOverview">
+                <div class="stat-card stat-card-blue">
+                    <div class="stat-icon-wrap stat-icon-blue">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="totalBooks">--</div>
+                        <div class="stat-label">图书总量</div>
+                    </div>
+                </div>
+                <div class="stat-card stat-card-amber">
+                    <div class="stat-icon-wrap stat-icon-amber">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="avgRating">--</div>
+                        <div class="stat-label">平均评分</div>
+                    </div>
+                </div>
+                <div class="stat-card stat-card-purple">
+                    <div class="stat-icon-wrap stat-icon-purple">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="totalDomains">--</div>
+                        <div class="stat-label">领域数量</div>
+                    </div>
+                </div>
+                <div class="stat-card stat-card-green">
+                    <div class="stat-icon-wrap stat-icon-green">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                    </div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="recentBooks">--</div>
+                        <div class="stat-label">近期新增</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stats-domain-section">
+                <div class="domain-chart-card">
+                    <div class="domain-chart-header">
+                        <div>
+                            <div class="chart-title">🏷️ 领域分布</div>
+                            <div class="chart-subtitle">各领域图书数量占比</div>
+                        </div>
+                    </div>
+                    <div class="domain-chart-container">
+                        <div class="pie-chart-wrapper">
+                            <svg id="pieChartSvg" viewBox="0 0 200 200" class="pie-chart"></svg>
+                            <div class="pie-chart-center">
+                                <div class="pie-center-value" id="pieCenterValue">0</div>
+                                <div class="pie-center-label">图书总量</div>
+                            </div>
+                        </div>
+                        <div class="pie-chart-legend" id="pieLegend">
+                            <div class="chart-loading">加载中...</div>
+                        </div>
+                    </div>
+                    <div class="pie-tooltip" id="pieTooltip" style="display: none;"></div>
+                </div>
+            </div>
+
+            <div class="top-books-section">
+                <div class="top-books-header">
+                    <h3>🏆 高评分图书</h3>
+                    <span class="top-books-sub">评分 Top 10</span>
+                </div>
+                <div class="top-books-scroll" id="topBooksScroll">
+                    <div class="chart-loading">加载中...</div>
+                </div>
+            </div>
+        </div>
+    </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/stats.js') }}?v=4"></script>
+</body>
+</html>
